@@ -8,8 +8,8 @@
 ## ビルドと署名
 
 - appバンドルは`cargo tauri build`で生成する。
-- 署名はad-hoc（識別子`com.cffnpwr.shepherdr`）とする。署名証明書は使わない。
-- ad-hoc署名ではLNP承認がcdhash単位のため、バイナリが変わるビルドごとに承認がリセットされる（[全体アーキテクチャ](./architecture.md)）。再承認の運用は[運用](./operations.md)で定める。
+- 署名はad-hoc（識別子`com.cffnpwr.shepherdr`）とする。署名を無償の範囲で完結させる方針であり、有償のApple Developer Program（Developer ID署名・公証）は使わない。
+- その代償として、LNP承認がcdhash単位のためバイナリが変わるビルドごとに承認がリセットされる制約を受容する（[全体アーキテクチャ](./architecture.md)）。再承認の運用は[運用](./operations.md)で定める。
 
 ## リリースと配布
 
