@@ -1,0 +1,15 @@
+# ~/.config/shepherdr/config.toml の記述例
+
+# ログイン環境（PATH等）が必要なサービスは login_shell を宣言する
+[[services]]
+name = "herdr"
+command = ["herdr", "server"]
+login_shell = true
+
+# 絶対パスで完結するサービスはそのままspawnされる
+[[services]]
+name = "example-daemon"
+command = ["/opt/homebrew/bin/example-daemon", "--verbose"]
+env = { RUST_LOG = "info" }
+cwd = "/Users/cffnpwr/work"
+enabled = false
