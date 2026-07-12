@@ -14,7 +14,7 @@
 ### 非スコープ
 
 - 配布用tap（`cffnpwr/homebrew-tap`）の実装
-- LaunchAgent plistと`config.toml`の配置・管理
+- LaunchAgent plistと`config.toml`の内容の定義・管理
 - 包む各サービス（herdr等）自体の実装・設定
 
 ## 目次

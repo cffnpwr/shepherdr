@@ -5,15 +5,15 @@
 macOSのLNP（TCC `kTCCServiceLocalNetwork`）は、LANへのアクセスを「責任アプリ」単位で承認する。
 前提となる事実は以下のとおり。
 
-- Daemon（root・グローバルセッション）はLNP対象外、ユーザセッションのAgentは対象かつ承認可能である（[TN3179](https://developer.apple.com/documentation/technotes/tn3179-understanding-local-network-privacy)、[Apple Developer Forums 763753](https://developer.apple.com/forums/thread/763753)）。
-- ad-hoc署名の素のCLIバイナリ（appバンドルでないもの）をLaunchAgentで起動した場合、承認プロンプトは出ず、システム設定→ローカルネットワークの一覧にも掲載されない。承認を与える手段が無く、LAN接続は既定拒否のまま固定される。
+- Daemon（グローバルセッション）はLNP対象外、ユーザセッションのAgentは対象かつ承認可能である（[TN3179](https://developer.apple.com/documentation/technotes/tn3179-understanding-local-network-privacy)、[Apple Developer Forums 763753](https://developer.apple.com/forums/thread/763753)）。
+- ad-hoc署名の素のCLIバイナリ（appバンドルでないもの）をLaunchAgentで起動した場合、承認プロンプトは出ず、システム設定→ローカルネットワークの一覧にも掲載されない（実機で確認済み）。承認を与える手段が無く、LAN接続は既定拒否のまま固定される。
 - ad-hoc署名のappバンドルを`/Applications`に置き、`open`（LaunchServices）でAquaセッションに起動してLANへ接続すると、承認プロンプトが出て一覧にも掲載される（最小テストappで実証済み。署名証明書は不要）。
 - LNPはプログラムの識別をcode signatureで追跡し、ad-hoc署名では識別を安定して追跡できない（[TN3179](https://developer.apple.com/documentation/technotes/tn3179-understanding-local-network-privacy)）。このため、バイナリが変わるリビルド後は承認が失われるものとして運用する（実機未検証）。
 
 典型的な被害例が、LaunchAgent起動の`herdr server`のペイン内からLANホストへssh不可（`EHOSTUNREACH`）となる問題である（同系統の未解決報告: [herdr discussion #1137](https://github.com/ogulcancelik/herdr/discussions/1137)）。
 
-LNP対象外であるDaemon（root・グローバルセッション）でサービスを動かす経路は採らない。
-サービスとその子孫がroot実行になり、ユーザセッション固有の資源（ssh鍵・keychain・`$HOME`配下の設定）を使えず、サービスが作るsocketの所有権もユーザ権限のクライアントと噛み合わなくなるためである。
+LNP対象外であるDaemon（グローバルセッション）でサービスを動かす経路は採らない。
+メニューバー常駐UIはユーザのGUIセッション（Aqua）を前提としており、gui domain外で動くDaemonでは成立しないためである。
 
 ## 全体構成
 
@@ -26,7 +26,7 @@ launchd (gui domain)
  └─ open /Applications/Shepherdr.app   ← LaunchAgent plist
      └─ Shepherdr.app                  ← LNPの責任アプリ・メニューバー常駐
          ├─ サービス1（config.tomlの定義からspawn）
-         │   └─ 子孫プロセス（LNP許可を継承）
+         │   └─ 子孫プロセス
          └─ サービス2 ...
 ```
 
@@ -44,11 +44,12 @@ launchd (gui domain)
 | Homebrew tap | リリース物の配布とquarantine解除の案内 | `cffnpwr/homebrew-tap` |
 | LNP承認 | システム設定→プライバシーとセキュリティ→ローカルネットワークでの許可 | 手動（初回とapp更新後） |
 
-全サービスとその子孫は同一の責任アプリ（Shepherdr.app）を継承するため、LNP承認は「Shepherdr」1エントリで全サービスを賄える。
+サービスの操作は責任コード=Shepherdr.appに帰属し、承認はapp全体に記録される（[設計原則](./principles.md)）。
+多段の子孫（サーバ→shell→`ssh`等）まで帰属が及び、LNP承認が「Shepherdr」1エントリで全サービスを賄えることは、実機で検証するまでの設計前提である。
 サービスの追加・変更は`config.toml`の編集のみで完結し、appバンドルが不変である限り再承認は不要である。
 
 ## app自体の起動と終了
 
 - サポートする起動経路は`open`（LaunchServices）経由のみとする。自動起動はLaunchAgentが`open /Applications/Shepherdr.app`を実行する形とする。
-- appのクラッシュからの復帰機構はapp側には持たない。
+- appのクラッシュからの復帰機構はapp側には持たない。クラッシュ後は次回の起動まで無復帰となり、その間サービスは孤児として稼働を続け、次回起動時に掃除された後、設定に従って起動し直される（[サービス管理](./service-management.md)）。
 - 多重起動はアプリ内ガード（単一インスタンス制御）で抑止する。`open`は`-n`を付けない限り既存インスタンスがあれば新規起動しないが、バイナリ直接実行など非サポート経路で起動された場合も多重化だけは防ぐ。
