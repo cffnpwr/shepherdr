@@ -1,7 +1,7 @@
 # 運用
 
 導入・更新・アンインストールの継続的な運用手順を示す。
-LaunchAgent plistと`config.toml`の配置は本書では扱わない。
+LaunchAgent plistと`config.toml`の内容の定義は本書では扱わない。
 
 ## 導入
 
