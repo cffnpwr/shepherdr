@@ -2,7 +2,7 @@
 
 ## 設定ファイル
 
-サービス定義は`~/.config/shepherdr/config.toml`に置く（配置はdotfilesの責務）。
+サービス定義は`~/.config/shepherdr/config.toml`に置く。
 記述例は[config.example.toml](./config.example.toml)を参照。
 
 `[[services]]`の各エントリは以下のフィールドを持つ。
@@ -24,10 +24,10 @@
 - appプロセスの環境にはログインシェルの設定（HomebrewのPATH等）が含まれない。ログイン環境が必要なサービスは`login_shell = true`を宣言する。
 - 各サービスは専用のプロセスグループでspawnする。停止と孤児掃除の単位になる（後述）。
 
-`login_shell = true`のサービスは、ログインシェル（macOS既定の`/bin/zsh`）の初期化を経た環境で起動される。
+`login_shell = true`のサービスは、ログインシェルの初期化を経た環境で起動される。
 挙動の契約は以下のとおり。
 
-- argvはこの場合もシェル評価されず、verbatimに保たれる。
+- argvはこの場合もシェル評価されず、記述したとおりに保たれる。
 - `command[0]`の解決はログインシェルのPATHに従う。
 - 環境はサービスの（再）起動のたびに再構築される。
 - `env`で明示した環境変数は、ログインシェルの初期化結果より優先して適用される。
