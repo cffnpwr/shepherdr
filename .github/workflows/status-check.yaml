@@ -1,0 +1,26 @@
+name: Status check
+on:
+  pull_request_target: # zizmor: ignore[dangerous-triggers]
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - edited
+
+concurrency:
+  group: ${{ github.workflow_ref }}-${{ github.event.number }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  status-check:
+    uses: cffnpwr/actions/.github/workflows/status-check.yaml@35681e3c3ad4cba2118bcf5e21b48cb3e3cbf096 # main
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+      checks: read
+      statuses: read

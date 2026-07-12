@@ -1,0 +1,15 @@
+[global]
+excludes = [".git/**", ".jj/**", "target/**"]
+
+[formatter.rustfmt]
+command = "rustfmt"
+includes = ["*.rs"]
+
+[formatter.yamlfmt]
+command = "yamlfmt"
+includes = ["*.yaml", "*.yml"]
+
+[formatter.tombi]
+command = "tombi"
+options = ["format"]
+includes = ["*.toml"]

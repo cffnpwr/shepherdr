@@ -1,0 +1,22 @@
+[package]
+name = "shepherdr"
+version = "0.0.0"
+edition = "2024"
+
+[dependencies]
+
+[lints.clippy]
+# restriction lints (opt-in individually)
+absolute_paths = "deny"
+all = "deny"
+allow_attributes_without_reason = "deny"
+clone_on_ref_ptr = "deny"
+manual_assert = "deny"
+mod_module_files = "deny"
+panic = "deny"
+pedantic = "deny"
+unused_trait_names = "deny"
+unwrap_used = "deny"
+
+[lints.rust]
+warnings = "deny"
