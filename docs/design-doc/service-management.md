@@ -21,7 +21,7 @@
 [設計原則](./principles.md)のとおり、シェルを暗黙に挟まず`command`のargvをそのまま子プロセスとして実行する。
 
 - `command[0]`が相対名の場合、appプロセスのPATH（LaunchServices経由の最小環境）で検索する（`posix_spawnp`相当）。
-- appプロセスの環境にはログインシェルの設定（HomebrewのPATH等）が含まれない。ログイン環境が必要なサービスは`login_shell = true`を宣言する。
+- appプロセスの環境が、ログインシェルの設定（HomebrewのPATH等）を含む保証は無い。ログイン環境が必要なサービスは`login_shell = true`を宣言する。
 - 各サービスは専用のプロセスグループでspawnする。停止と孤児掃除の単位になる（後述）。
 
 `login_shell = true`のサービスは、ログインシェルの初期化を経た環境で起動される。
