@@ -9,7 +9,7 @@
 
 - appバンドルは`cargo tauri build`で生成する。
 - 署名はad-hoc（識別子`dev.cffnpwr.shepherdr`）とする。署名を無償の範囲で完結させる方針であり、有償のApple Developer Program（Developer ID署名・公証）は使わない。
-- その代償として、ad-hoc署名ではLNPが識別を安定して追跡できないため、バイナリが変わるビルドごとに再承認が必要になる前提を受容する（[全体アーキテクチャ](./architecture.md)）。再承認の運用は[運用](./operations.md)で定める。
+- バンドルIDと配置先が同一の差し替えであれば、バイナリが変わってもLNP承認は維持される（実機で確認済み）。ad-hoc署名では識別の安定した追跡は保証されないため（[全体アーキテクチャ](./architecture.md)）、更新後に接続が拒否された場合の再許可を[運用](./operations.md)で定める。
 
 ## リリースと配布
 
