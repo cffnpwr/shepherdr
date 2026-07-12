@@ -1,0 +1,4 @@
+[tools]
+yamlfmt = "0.21.0"
+tombi = "1.2.0"
+"aqua:numtide/treefmt" = "2.5.0"
