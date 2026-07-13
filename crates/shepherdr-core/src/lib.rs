@@ -1,1 +1,3 @@
-//! shepherdr のサービススーパーバイザ中核。
+//! Core of Shepherdr, a service supervisor.
+
+pub mod config;
