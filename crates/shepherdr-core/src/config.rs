@@ -1,9 +1,9 @@
 //! Schema and parsing for the Shepherdr config file.
 
-use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::{env, fs, io};
 
+use rustc_hash::{FxHashMap, FxHashSet};
 use serde::Deserialize;
 use thiserror::Error;
 use toml::de;
@@ -30,7 +30,7 @@ pub struct Service {
     pub login_shell: bool,
     /// Extra environment variables layered on top of the app process environment.
     #[serde(default)]
-    pub env: HashMap<String, String>,
+    pub env: FxHashMap<String, String>,
     /// Working directory. Inherits the app process's when unset.
     #[serde(default)]
     pub cwd: Option<PathBuf>,
@@ -107,7 +107,7 @@ impl Config {
 
     /// Validates `name` uniqueness and that each `command` is non-empty.
     fn validate(&self) -> Result<(), ConfigError> {
-        let mut seen = HashSet::new();
+        let mut seen = FxHashSet::default();
         for service in &self.services {
             if service.command.is_empty() {
                 return Err(ConfigError::EmptyCommand(service.name.clone()));
@@ -157,7 +157,7 @@ mod tests {
                 name: "herdr".to_owned(),
                 command: vec!["herdr".to_owned(), "server".to_owned()],
                 login_shell: false,
-                env: HashMap::new(),
+                env: FxHashMap::default(),
                 cwd: None,
                 enabled: true,
             }],
@@ -190,7 +190,7 @@ mod tests {
                     "--verbose".to_owned(),
                 ],
                 login_shell: true,
-                env: HashMap::from([("RUST_LOG".to_owned(), "info".to_owned())]),
+                env: FxHashMap::from_iter([("RUST_LOG".to_owned(), "info".to_owned())]),
                 cwd: Some(PathBuf::from("/Users/cffnpwr/work")),
                 enabled: false,
             }],
