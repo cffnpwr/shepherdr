@@ -1,5 +1,10 @@
 # ~/.config/shepherdr/config.toml の記述例
 
+# [log]セクションは省略可能。省略したフィールドは実装の既定値（10MiB / 5世代）を使う
+[log]
+max_size = "10MiB"
+max_generations = 5
+
 # ログイン環境（PATH等）が必要なサービスは login_shell を宣言する
 [[services]]
 name = "herdr"

@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+bytesize = "2.4.2"
 nix = { version = "0.31.3", features = ["user"] }
 rustc-hash = "2.1.3"
 serde = { version = "1.0.228", features = ["derive"] }
