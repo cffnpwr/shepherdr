@@ -1,6 +1,7 @@
 //! Schema and parsing for the Shepherdr config file.
 
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 use std::{env, fs, io};
 
 use bytesize::ByteSize;
@@ -22,6 +23,9 @@ pub struct Config {
     /// The optional `[log]` section overriding the log rotation limits.
     #[serde(default)]
     pub log: LogConfig,
+    /// Overrides for the restart/backoff/failure-detection policy.
+    #[serde(default)]
+    pub restart: RestartConfig,
 }
 
 /// A single `[[services]]` entry.
@@ -104,6 +108,130 @@ where
         .map_err(D::Error::custom)
 }
 
+/// The optional top-level `[restart]` section.
+///
+/// Every field is optional and falls back to an implementation-chosen default
+/// when omitted (see the `DEFAULT_*` constants below). Duration fields are
+/// parsed by the `humantime` crate (via `humantime-serde`), e.g. `"1s"`,
+/// `"500ms"`, or `"1h 30m"`. See `humantime::parse_duration`'s documentation
+/// for the full grammar; notably, unit letters are case-sensitive and a
+/// capital `M` means months (not minutes).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RestartConfig {
+    /// Initial interval of the exponential restart backoff.
+    #[serde(
+        default = "default_initial_backoff",
+        deserialize_with = "humantime_serde::deserialize"
+    )]
+    pub initial_backoff: Duration,
+    /// Upper bound of the restart backoff.
+    #[serde(
+        default = "default_max_backoff",
+        deserialize_with = "humantime_serde::deserialize"
+    )]
+    pub max_backoff: Duration,
+    /// Growth multiplier applied to the backoff on each non-stable exit. Must be at least 1.
+    #[serde(default = "default_backoff_multiplier")]
+    pub backoff_multiplier: u32,
+    /// Uptime at or above which a run is considered stable, resetting the backoff to its
+    /// initial interval.
+    #[serde(
+        default = "default_stable_uptime",
+        deserialize_with = "humantime_serde::deserialize"
+    )]
+    pub stable_uptime: Duration,
+    /// Uptime below which an exit is counted as a failure, regardless of the exit code or
+    /// signal.
+    #[serde(
+        default = "default_failure_uptime_threshold",
+        deserialize_with = "humantime_serde::deserialize"
+    )]
+    pub failure_uptime_threshold: Duration,
+    /// Number of consecutive failures after which auto-restart stops and the service
+    /// transitions to the failed state. Must be at least 1.
+    #[serde(default = "default_max_consecutive_failures")]
+    pub max_consecutive_failures: u32,
+}
+
+impl Default for RestartConfig {
+    fn default() -> Self {
+        Self {
+            initial_backoff: DEFAULT_INITIAL_BACKOFF,
+            max_backoff: DEFAULT_MAX_BACKOFF,
+            backoff_multiplier: DEFAULT_BACKOFF_MULTIPLIER,
+            stable_uptime: DEFAULT_STABLE_UPTIME,
+            failure_uptime_threshold: DEFAULT_FAILURE_UPTIME_THRESHOLD,
+            max_consecutive_failures: DEFAULT_MAX_CONSECUTIVE_FAILURES,
+        }
+    }
+}
+
+impl RestartConfig {
+    /// Validates that durations are positive, `backoff_multiplier` and
+    /// `max_consecutive_failures` are at least 1, and `initial_backoff` does not exceed
+    /// `max_backoff`.
+    fn validate(&self) -> Result<(), ConfigError> {
+        for (field, value) in [
+            ("initial_backoff", self.initial_backoff),
+            ("max_backoff", self.max_backoff),
+            ("stable_uptime", self.stable_uptime),
+            ("failure_uptime_threshold", self.failure_uptime_threshold),
+        ] {
+            if value.is_zero() {
+                return Err(ConfigError::RestartValueNotPositive { field });
+            }
+        }
+        if self.backoff_multiplier < 1 {
+            return Err(ConfigError::RestartMultiplierTooSmall);
+        }
+        if self.max_consecutive_failures < 1 {
+            return Err(ConfigError::RestartMaxConsecutiveFailuresTooSmall);
+        }
+        if self.initial_backoff > self.max_backoff {
+            return Err(ConfigError::RestartInitialBackoffExceedsMax);
+        }
+        Ok(())
+    }
+}
+
+/// Default `initial_backoff`: 1 second.
+const DEFAULT_INITIAL_BACKOFF: Duration = Duration::from_secs(1);
+/// Default `max_backoff`: 30 seconds.
+const DEFAULT_MAX_BACKOFF: Duration = Duration::from_secs(30);
+/// Default `backoff_multiplier`: doubling.
+const DEFAULT_BACKOFF_MULTIPLIER: u32 = 2;
+/// Default `stable_uptime`: 60 seconds.
+const DEFAULT_STABLE_UPTIME: Duration = Duration::from_secs(60);
+/// Default `failure_uptime_threshold`: 5 seconds.
+const DEFAULT_FAILURE_UPTIME_THRESHOLD: Duration = Duration::from_secs(5);
+/// Default `max_consecutive_failures`: 5.
+const DEFAULT_MAX_CONSECUTIVE_FAILURES: u32 = 5;
+
+const fn default_initial_backoff() -> Duration {
+    DEFAULT_INITIAL_BACKOFF
+}
+
+const fn default_max_backoff() -> Duration {
+    DEFAULT_MAX_BACKOFF
+}
+
+const fn default_backoff_multiplier() -> u32 {
+    DEFAULT_BACKOFF_MULTIPLIER
+}
+
+const fn default_stable_uptime() -> Duration {
+    DEFAULT_STABLE_UPTIME
+}
+
+const fn default_failure_uptime_threshold() -> Duration {
+    DEFAULT_FAILURE_UPTIME_THRESHOLD
+}
+
+const fn default_max_consecutive_failures() -> u32 {
+    DEFAULT_MAX_CONSECUTIVE_FAILURES
+}
+
 /// Errors raised while loading or parsing the configuration.
 #[derive(Debug, Error)]
 pub enum ConfigError {
@@ -134,6 +262,21 @@ pub enum ConfigError {
     /// The `[log]` section's `max_generations` is not at least 1.
     #[error("log max_generations must be at least 1")]
     LogMaxGenerationsTooSmall,
+    /// A `[restart]` duration field is zero.
+    #[error("restart.{field} must be a positive duration")]
+    RestartValueNotPositive {
+        /// The name of the offending field.
+        field: &'static str,
+    },
+    /// `restart.backoff_multiplier` is less than 1.
+    #[error("restart.backoff_multiplier must be at least 1")]
+    RestartMultiplierTooSmall,
+    /// `restart.max_consecutive_failures` is less than 1.
+    #[error("restart.max_consecutive_failures must be at least 1")]
+    RestartMaxConsecutiveFailuresTooSmall,
+    /// `restart.initial_backoff` is greater than `restart.max_backoff`.
+    #[error("restart.initial_backoff must not exceed restart.max_backoff")]
+    RestartInitialBackoffExceedsMax,
 }
 
 impl Config {
@@ -164,16 +307,17 @@ impl Config {
     ///
     /// # Errors
     ///
-    /// Returns an error when TOML parsing fails (including an unparseable `max_size` unit
-    /// string), when a `name` is duplicated, when a `command` is empty, or when the `[log]`
-    /// section's `max_size` is not positive or `max_generations` is not at least 1.
+    /// Returns an error when TOML parsing fails (including an unparseable `max_size` or
+    /// duration unit string), when a `name` is duplicated, when a `command` is empty, or when
+    /// the `[log]` or `[restart]` section fails validation.
     pub fn parse(content: &str) -> Result<Self, ConfigError> {
         let config: Self = toml::from_str(content)?;
         config.validate()?;
         Ok(config)
     }
 
-    /// Validates the `[log]` section, `name` uniqueness, and that each `command` is non-empty.
+    /// Validates the `[log]` and `[restart]` sections, `name` uniqueness, and that each
+    /// `command` is non-empty.
     fn validate(&self) -> Result<(), ConfigError> {
         if self.log.max_size == 0 {
             return Err(ConfigError::LogMaxSizeNotPositive);
@@ -191,7 +335,7 @@ impl Config {
                 return Err(ConfigError::DuplicateName(service.name.clone()));
             }
         }
-        Ok(())
+        self.restart.validate()
     }
 }
 
@@ -237,6 +381,7 @@ mod tests {
                 enabled: true,
             }],
             log: LogConfig::default(),
+            restart: RestartConfig::default(),
         };
         assert_eq!(result.ok(), Some(expected));
     }
@@ -271,6 +416,7 @@ mod tests {
                 enabled: false,
             }],
             log: LogConfig::default(),
+            restart: RestartConfig::default(),
         };
         assert_eq!(result.ok(), Some(expected));
     }
@@ -283,10 +429,11 @@ mod tests {
         // When it is parsed
         let result = Config::parse(input);
 
-        // Then the config has no services and the log section takes its defaults
+        // Then the config has no services and the log and restart sections take their defaults
         let expected = Config {
             services: vec![],
             log: LogConfig::default(),
+            restart: RestartConfig::default(),
         };
         assert_eq!(result.ok(), Some(expected));
     }
@@ -391,6 +538,7 @@ mod tests {
                 max_size: 20 * 1024 * 1024,
                 max_generations: 3,
             },
+            restart: RestartConfig::default(),
         };
         assert_eq!(result.ok(), Some(expected));
     }
@@ -534,5 +682,268 @@ mod tests {
 
         // Then it fails while parsing TOML
         assert!(matches!(result, Err(ConfigError::Parse(_))));
+    }
+
+    #[test]
+    fn positive_parse_applies_restart_defaults_when_the_section_is_absent() {
+        // Given input with no [restart] section
+        let input = "";
+
+        // When it is parsed
+        let result = Config::parse(input);
+
+        // Then restart takes its default values
+        assert_eq!(
+            result.ok().map(|config| config.restart),
+            Some(RestartConfig::default())
+        );
+    }
+
+    #[test]
+    fn positive_parse_reads_all_restart_fields() {
+        // Given a [restart] section that sets every field
+        let input = r#"
+            [restart]
+            initial_backoff = "2s"
+            max_backoff = "45s"
+            backoff_multiplier = 3
+            stable_uptime = "90s"
+            failure_uptime_threshold = "10s"
+            max_consecutive_failures = 7
+            "#;
+
+        // When it is parsed
+        let result = Config::parse(input);
+
+        // Then every field is read exactly as written
+        let expected = RestartConfig {
+            initial_backoff: Duration::from_secs(2),
+            max_backoff: Duration::from_secs(45),
+            backoff_multiplier: 3,
+            stable_uptime: Duration::from_secs(90),
+            failure_uptime_threshold: Duration::from_secs(10),
+            max_consecutive_failures: 7,
+        };
+        assert_eq!(result.ok().map(|config| config.restart), Some(expected));
+    }
+
+    #[test]
+    fn positive_parse_applies_restart_defaults_for_omitted_fields() {
+        // Given a [restart] section that sets only one field
+        let input = r"
+            [restart]
+            backoff_multiplier = 4
+            ";
+
+        // When it is parsed
+        let result = Config::parse(input);
+
+        // Then the omitted fields fall back to their defaults
+        let expected = RestartConfig {
+            backoff_multiplier: 4,
+            ..RestartConfig::default()
+        };
+        assert_eq!(result.ok().map(|config| config.restart), Some(expected));
+    }
+
+    #[test]
+    fn negative_parse_rejects_non_positive_restart_duration() {
+        // Given a [restart] section whose duration field is zero
+        let input = r#"
+            [restart]
+            initial_backoff = "0s"
+            "#;
+
+        // When it is parsed
+        let result = Config::parse(input);
+
+        // Then it fails naming the offending field
+        assert!(matches!(
+            result,
+            Err(ConfigError::RestartValueNotPositive {
+                field: "initial_backoff"
+            })
+        ));
+    }
+
+    #[test]
+    fn negative_parse_rejects_restart_multiplier_below_one() {
+        // Given a [restart] section with a multiplier of zero
+        let input = r"
+            [restart]
+            backoff_multiplier = 0
+            ";
+
+        // When it is parsed
+        let result = Config::parse(input);
+
+        // Then it fails as too small
+        assert!(matches!(
+            result,
+            Err(ConfigError::RestartMultiplierTooSmall)
+        ));
+    }
+
+    #[test]
+    fn negative_parse_rejects_restart_max_consecutive_failures_below_one() {
+        // Given a [restart] section with a failure limit of zero
+        let input = r"
+            [restart]
+            max_consecutive_failures = 0
+            ";
+
+        // When it is parsed
+        let result = Config::parse(input);
+
+        // Then it fails as too small
+        assert!(matches!(
+            result,
+            Err(ConfigError::RestartMaxConsecutiveFailuresTooSmall)
+        ));
+    }
+
+    #[test]
+    fn negative_parse_rejects_restart_initial_backoff_greater_than_max() {
+        // Given a [restart] section where initial_backoff exceeds max_backoff
+        let input = r#"
+            [restart]
+            initial_backoff = "10s"
+            max_backoff = "5s"
+            "#;
+
+        // When it is parsed
+        let result = Config::parse(input);
+
+        // Then it fails as an ordering violation
+        assert!(matches!(
+            result,
+            Err(ConfigError::RestartInitialBackoffExceedsMax)
+        ));
+    }
+
+    #[test]
+    fn negative_parse_rejects_a_malformed_restart_duration() {
+        // Given a [restart] duration string without a recognized unit
+        let input = r#"
+            [restart]
+            initial_backoff = "not-a-duration"
+            "#;
+
+        // When it is parsed
+        let result = Config::parse(input);
+
+        // Then it fails while parsing TOML
+        assert!(matches!(result, Err(ConfigError::Parse(_))));
+    }
+
+    #[test]
+    fn negative_parse_rejects_an_unknown_restart_field() {
+        // Given a [restart] section with an unknown field
+        let input = r#"
+            [restart]
+            typo_field = "1s"
+            "#;
+
+        // When it is parsed
+        let result = Config::parse(input);
+
+        // Then it fails while parsing TOML
+        assert!(matches!(result, Err(ConfigError::Parse(_))));
+    }
+
+    #[test]
+    fn positive_parse_restart_durations_accept_milliseconds_minutes_and_hours() {
+        // Given a [restart] section using milliseconds, minutes, and hours alongside seconds
+        let input = r#"
+            [restart]
+            initial_backoff = "500ms"
+            max_backoff = "2h"
+            stable_uptime = "1m"
+            failure_uptime_threshold = "1s"
+            "#;
+
+        // When it is parsed
+        let result = Config::parse(input);
+
+        // Then every unit is converted to the equivalent Duration
+        let expected = RestartConfig {
+            initial_backoff: Duration::from_millis(500),
+            max_backoff: Duration::from_hours(2),
+            stable_uptime: Duration::from_secs(60),
+            failure_uptime_threshold: Duration::from_secs(1),
+            ..RestartConfig::default()
+        };
+        assert_eq!(result.ok().map(|config| config.restart), Some(expected));
+    }
+
+    #[test]
+    fn positive_parse_restart_duration_accepts_a_compound_expression() {
+        // Given a [restart] duration combining two units with a space, as humantime supports
+        let input = r#"
+            [restart]
+            initial_backoff = "1h 30m"
+            max_backoff = "2h"
+            "#;
+
+        // When it is parsed
+        let result = Config::parse(input);
+
+        // Then it sums to the combined duration
+        let expected = RestartConfig {
+            initial_backoff: Duration::from_mins(90),
+            max_backoff: Duration::from_hours(2),
+            ..RestartConfig::default()
+        };
+        assert_eq!(result.ok().map(|config| config.restart), Some(expected));
+    }
+
+    #[test]
+    fn positive_parse_restart_duration_treats_uppercase_m_as_months_not_minutes() {
+        // Given a [restart] duration using an uppercase "M", which humantime reserves for
+        // months rather than minutes (only lowercase "m" means minutes)
+        let input = r#"
+            [restart]
+            initial_backoff = "1M"
+            max_backoff = "2M"
+            "#;
+
+        // When it is parsed
+        let result = Config::parse(input);
+
+        // Then it resolves to 30.44-day months, not 1-minute intervals
+        let expected = RestartConfig {
+            initial_backoff: Duration::from_secs(2_630_016),
+            max_backoff: Duration::from_secs(2 * 2_630_016),
+            ..RestartConfig::default()
+        };
+        assert_eq!(result.ok().map(|config| config.restart), Some(expected));
+    }
+
+    #[test]
+    fn negative_parse_rejects_restart_duration_with_an_uppercase_unit_letter() {
+        // Given a [restart] duration whose unit letter is uppercased (only "M" is a valid
+        // uppercase unit, meaning months; "S" is not a recognized unit)
+        let input = r#"
+            [restart]
+            initial_backoff = "1S"
+            "#;
+
+        // When it is parsed
+        let result = Config::parse(input);
+
+        // Then it fails while parsing TOML
+        assert!(matches!(result, Err(ConfigError::Parse(_))));
+    }
+
+    #[test]
+    fn positive_parse_accepts_the_documented_example_config() {
+        // Given the example config shown in the design doc, including its [restart] section
+        let input = include_str!("../../../docs/design-doc/config.example.toml");
+
+        // When it is parsed
+        let result = Config::parse(input);
+
+        // Then it parses and validates successfully
+        assert!(result.is_ok());
     }
 }

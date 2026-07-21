@@ -39,6 +39,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
 
 [[package]]
+name = "humantime"
+version = "2.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "15cdd26707701c53297e2fa6afb323d55fbc1d0810c3aec078ae3ef0424c3c15"
+
+[[package]]
+name = "humantime-serde"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "57a3db5ea5923d99402c94e9feb261dc5ee9b4efa158b0315f788cf549cc200c"
+dependencies = [
+ "humantime",
+ "serde",
+]
+
+[[package]]
 name = "indexmap"
 version = "2.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -134,6 +150,8 @@ name = "shepherdr-core"
 version = "0.0.0"
 dependencies = [
  "bytesize",
+ "humantime",
+ "humantime-serde",
  "nix",
  "rustc-hash",
  "serde",
