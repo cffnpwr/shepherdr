@@ -4,3 +4,4 @@ pub mod config;
 pub mod logging;
 pub mod monitor;
 pub mod spawn;
+pub mod stop;

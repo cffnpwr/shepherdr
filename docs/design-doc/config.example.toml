@@ -1,11 +1,13 @@
 # ~/.config/shepherdr/config.toml の記述例
 
-# [log]セクションは省略可能。省略したフィールドは実装の既定値（10MiB / 5世代）を使う
+# [log]セクションは省略可能。max_sizeは"10MiB"・"10MB"のように単位付き文字列で指定する。
+# 省略したフィールドは実装の既定値（10MiB / 5世代）を使う
 [log]
 max_size = "10MiB"
 max_generations = 5
 
-# 再起動ポリシーの既定値を上書きする（省略した場合はすべて実装の既定値）
+# 再起動ポリシーの既定値を上書きする。時間は"1s"・"1h 30m"のように単位付き文字列で指定する
+# （省略した場合はすべて実装の既定値）
 [restart]
 initial_backoff = "1s"
 max_backoff = "30s"
@@ -13,6 +15,10 @@ backoff_multiplier = 2
 stable_uptime = "60s"
 failure_uptime_threshold = "5s"
 max_consecutive_failures = 5
+
+# [stop]セクションは省略可能。省略したフィールドは実装の既定値（10秒）を使う
+[stop]
+grace_period = "10s"
 
 # ログイン環境（PATH等）が必要なサービスは login_shell を宣言する
 [[services]]

@@ -1,11 +1,11 @@
 //! Spawning service child processes.
 
 use std::ffi::OsString;
-use std::os::unix::process::CommandExt as _;
-use std::process::{Child, Command, Stdio};
+use std::process::Stdio;
 use std::{env, io};
 
 use nix::unistd::{Uid, User};
+use tokio::process::{Child, Command};
 
 use crate::config::Service;
 
@@ -33,6 +33,10 @@ use crate::config::Service;
 /// Returns an error when `command` is empty, when the login shell path cannot be
 /// spawned, when the app working directory cannot be resolved for a login-shell
 /// service without a `cwd`, or when the child process cannot be spawned.
+///
+/// # Panics
+///
+/// Panics if called outside a Tokio runtime.
 pub fn spawn(service: &Service) -> io::Result<Child> {
     if service.login_shell {
         spawn_login_shell(service)
@@ -147,15 +151,15 @@ mod tests {
         }
     }
 
-    #[test]
-    fn positive_spawn_runs_in_its_own_process_group() {
+    #[tokio::test]
+    async fn positive_spawn_runs_in_its_own_process_group() {
         // Given a service whose shell reports its own process group
         let svc = service(&["sh", "-c", "ps -o pgid= -p $$"]);
 
         // When it is spawned
         let child = spawn(&svc).expect("spawn should succeed");
-        let child_pid = child.id();
-        let output = child.wait_with_output().expect("child should run");
+        let child_pid = child.id().expect("child should still be running");
+        let output = child.wait_with_output().await.expect("child should run");
 
         // Then the reported process group equals the child pid: it leads a new group
         let reported = String::from_utf8_lossy(&output.stdout);
@@ -163,8 +167,8 @@ mod tests {
         assert_eq!(group, child_pid);
     }
 
-    #[test]
-    fn positive_env_is_layered_and_relative_name_resolves_via_path() {
+    #[tokio::test]
+    async fn positive_env_is_layered_and_relative_name_resolves_via_path() {
         // Given a relative command that reads an overlaid env var
         let mut svc = service(&["printenv", "SHEPHERDR_TEST_VAR"]);
         svc.env
@@ -174,14 +178,15 @@ mod tests {
         let output = spawn(&svc)
             .expect("spawn should succeed")
             .wait_with_output()
+            .await
             .expect("child should run");
 
         // Then the overlaid value is visible to the child
         assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "hello");
     }
 
-    #[test]
-    fn positive_cwd_sets_the_working_directory() {
+    #[tokio::test]
+    async fn positive_cwd_sets_the_working_directory() {
         // Given a service that prints its working directory, set to a temp dir
         let dir = env::temp_dir()
             .canonicalize()
@@ -193,6 +198,7 @@ mod tests {
         let output = spawn(&svc)
             .expect("spawn should succeed")
             .wait_with_output()
+            .await
             .expect("child should run");
 
         // Then the child's working directory is the one requested
@@ -200,8 +206,8 @@ mod tests {
         assert_eq!(Path::new(printed.trim()), dir);
     }
 
-    #[test]
-    fn positive_argv_is_not_shell_evaluated() {
+    #[tokio::test]
+    async fn positive_argv_is_not_shell_evaluated() {
         // Given an argument containing shell metacharacters
         let svc = service(&["printf", "%s", "$HOME"]);
 
@@ -209,14 +215,15 @@ mod tests {
         let output = spawn(&svc)
             .expect("spawn should succeed")
             .wait_with_output()
+            .await
             .expect("child should run");
 
         // Then the argument reaches the program verbatim, unexpanded
         assert_eq!(String::from_utf8_lossy(&output.stdout), "$HOME");
     }
 
-    #[test]
-    fn negative_spawn_rejects_empty_command() {
+    #[tokio::test]
+    async fn negative_spawn_rejects_empty_command() {
         // Given a service with no command
         let svc = service(&[]);
 
@@ -254,16 +261,16 @@ mod tests {
         assert!(!resolved.is_empty());
     }
 
-    #[test]
-    fn positive_login_shell_runs_in_its_own_process_group() {
+    #[tokio::test]
+    async fn positive_login_shell_runs_in_its_own_process_group() {
         // Given a login-shell service whose shell reports its own process group
         let mut svc = service(&["sh", "-c", "ps -o pgid= -p $$"]);
         svc.login_shell = true;
 
         // When it is spawned
         let child = spawn(&svc).expect("spawn should succeed");
-        let child_pid = child.id();
-        let output = child.wait_with_output().expect("child should run");
+        let child_pid = child.id().expect("child should still be running");
+        let output = child.wait_with_output().await.expect("child should run");
 
         // Then the process group survives the exec chain and leads a new group
         let reported = String::from_utf8_lossy(&output.stdout);
@@ -271,8 +278,8 @@ mod tests {
         assert_eq!(group, child_pid);
     }
 
-    #[test]
-    fn positive_login_shell_argv_is_not_shell_evaluated() {
+    #[tokio::test]
+    async fn positive_login_shell_argv_is_not_shell_evaluated() {
         // Given a relative command with a shell metacharacter argument
         let mut svc = service(&["printf", "%s", "$HOME"]);
         svc.login_shell = true;
@@ -281,14 +288,15 @@ mod tests {
         let output = spawn(&svc)
             .expect("spawn should succeed")
             .wait_with_output()
+            .await
             .expect("child should run");
 
         // Then the argument is verbatim and the relative name resolved via the login PATH
         assert_eq!(String::from_utf8_lossy(&output.stdout), "$HOME");
     }
 
-    #[test]
-    fn positive_login_shell_env_overrides_inherited_value() {
+    #[tokio::test]
+    async fn positive_login_shell_env_overrides_inherited_value() {
         // Given a login-shell service that overrides HOME, which the login shell exports
         let mut svc = service(&["printenv", "HOME"]);
         svc.login_shell = true;
@@ -299,6 +307,7 @@ mod tests {
         let output = spawn(&svc)
             .expect("spawn should succeed")
             .wait_with_output()
+            .await
             .expect("child should run");
 
         // Then env takes precedence over the login-initialized value
@@ -308,8 +317,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn positive_login_shell_cwd_sets_the_working_directory() {
+    #[tokio::test]
+    async fn positive_login_shell_cwd_sets_the_working_directory() {
         // Given a login-shell service with a working directory set to a temp dir
         let dir = env::temp_dir()
             .canonicalize()
@@ -322,6 +331,7 @@ mod tests {
         let output = spawn(&svc)
             .expect("spawn should succeed")
             .wait_with_output()
+            .await
             .expect("child should run");
 
         // Then the working directory is the requested one, not the login default

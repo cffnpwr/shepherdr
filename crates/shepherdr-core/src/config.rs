@@ -12,6 +12,20 @@ use thiserror::Error;
 use toml::de;
 
 use crate::logging::{DEFAULT_MAX_BYTES, DEFAULT_MAX_GENERATIONS};
+use crate::stop::DEFAULT_GRACE_PERIOD;
+
+/// Default `initial_backoff`: 1 second.
+const DEFAULT_INITIAL_BACKOFF: Duration = Duration::from_secs(1);
+/// Default `max_backoff`: 30 seconds.
+const DEFAULT_MAX_BACKOFF: Duration = Duration::from_secs(30);
+/// Default `backoff_multiplier`: doubling.
+const DEFAULT_BACKOFF_MULTIPLIER: u32 = 2;
+/// Default `stable_uptime`: 60 seconds.
+const DEFAULT_STABLE_UPTIME: Duration = Duration::from_secs(60);
+/// Default `failure_uptime_threshold`: 5 seconds.
+const DEFAULT_FAILURE_UPTIME_THRESHOLD: Duration = Duration::from_secs(5);
+/// Default `max_consecutive_failures`: 5.
+const DEFAULT_MAX_CONSECUTIVE_FAILURES: u32 = 5;
 
 /// The whole configuration file.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -26,6 +40,9 @@ pub struct Config {
     /// Overrides for the restart/backoff/failure-detection policy.
     #[serde(default)]
     pub restart: RestartConfig,
+    /// Overrides for the stop-sequence grace period.
+    #[serde(default)]
+    pub stop: StopConfig,
 }
 
 /// A single `[[services]]` entry.
@@ -195,19 +212,6 @@ impl RestartConfig {
     }
 }
 
-/// Default `initial_backoff`: 1 second.
-const DEFAULT_INITIAL_BACKOFF: Duration = Duration::from_secs(1);
-/// Default `max_backoff`: 30 seconds.
-const DEFAULT_MAX_BACKOFF: Duration = Duration::from_secs(30);
-/// Default `backoff_multiplier`: doubling.
-const DEFAULT_BACKOFF_MULTIPLIER: u32 = 2;
-/// Default `stable_uptime`: 60 seconds.
-const DEFAULT_STABLE_UPTIME: Duration = Duration::from_secs(60);
-/// Default `failure_uptime_threshold`: 5 seconds.
-const DEFAULT_FAILURE_UPTIME_THRESHOLD: Duration = Duration::from_secs(5);
-/// Default `max_consecutive_failures`: 5.
-const DEFAULT_MAX_CONSECUTIVE_FAILURES: u32 = 5;
-
 const fn default_initial_backoff() -> Duration {
     DEFAULT_INITIAL_BACKOFF
 }
@@ -230,6 +234,31 @@ const fn default_failure_uptime_threshold() -> Duration {
 
 const fn default_max_consecutive_failures() -> u32 {
     DEFAULT_MAX_CONSECUTIVE_FAILURES
+}
+
+/// The optional top-level `[stop]` section, overriding the stop-sequence grace period.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StopConfig {
+    /// Grace period between `SIGTERM` and the follow-up `SIGKILL`. Defaults to
+    /// [`DEFAULT_GRACE_PERIOD`] when unset.
+    #[serde(
+        default = "default_grace_period",
+        deserialize_with = "humantime_serde::deserialize"
+    )]
+    pub grace_period: Duration,
+}
+
+impl Default for StopConfig {
+    fn default() -> Self {
+        Self {
+            grace_period: default_grace_period(),
+        }
+    }
+}
+
+const fn default_grace_period() -> Duration {
+    DEFAULT_GRACE_PERIOD
 }
 
 /// Errors raised while loading or parsing the configuration.
@@ -277,6 +306,9 @@ pub enum ConfigError {
     /// `restart.initial_backoff` is greater than `restart.max_backoff`.
     #[error("restart.initial_backoff must not exceed restart.max_backoff")]
     RestartInitialBackoffExceedsMax,
+    /// The `[stop]` section's `grace_period` is zero.
+    #[error("stop.grace_period must be a positive duration")]
+    StopGracePeriodNotPositive,
 }
 
 impl Config {
@@ -316,14 +348,17 @@ impl Config {
         Ok(config)
     }
 
-    /// Validates the `[log]` and `[restart]` sections, `name` uniqueness, and that each
-    /// `command` is non-empty.
+    /// Validates the `[log]`, `[restart]`, and `[stop]` sections, `name` uniqueness, and that
+    /// each `command` is non-empty.
     fn validate(&self) -> Result<(), ConfigError> {
         if self.log.max_size == 0 {
             return Err(ConfigError::LogMaxSizeNotPositive);
         }
         if self.log.max_generations == 0 {
             return Err(ConfigError::LogMaxGenerationsTooSmall);
+        }
+        if self.stop.grace_period.is_zero() {
+            return Err(ConfigError::StopGracePeriodNotPositive);
         }
 
         let mut seen = FxHashSet::default();
@@ -382,6 +417,7 @@ mod tests {
             }],
             log: LogConfig::default(),
             restart: RestartConfig::default(),
+            stop: StopConfig::default(),
         };
         assert_eq!(result.ok(), Some(expected));
     }
@@ -417,6 +453,7 @@ mod tests {
             }],
             log: LogConfig::default(),
             restart: RestartConfig::default(),
+            stop: StopConfig::default(),
         };
         assert_eq!(result.ok(), Some(expected));
     }
@@ -429,11 +466,13 @@ mod tests {
         // When it is parsed
         let result = Config::parse(input);
 
-        // Then the config has no services and the log and restart sections take their defaults
+        // Then the config has no services and the log, restart, and stop sections take their
+        // defaults
         let expected = Config {
             services: vec![],
             log: LogConfig::default(),
             restart: RestartConfig::default(),
+            stop: StopConfig::default(),
         };
         assert_eq!(result.ok(), Some(expected));
     }
@@ -539,6 +578,7 @@ mod tests {
                 max_generations: 3,
             },
             restart: RestartConfig::default(),
+            stop: StopConfig::default(),
         };
         assert_eq!(result.ok(), Some(expected));
     }
@@ -926,6 +966,72 @@ mod tests {
         let input = r#"
             [restart]
             initial_backoff = "1S"
+            "#;
+
+        // When it is parsed
+        let result = Config::parse(input);
+
+        // Then it fails while parsing TOML
+        assert!(matches!(result, Err(ConfigError::Parse(_))));
+    }
+
+    #[test]
+    fn positive_parse_applies_stop_defaults_when_the_section_is_absent() {
+        // Given input with no [stop] section
+        let input = "";
+
+        // When it is parsed
+        let result = Config::parse(input);
+
+        // Then stop takes its default value
+        assert_eq!(
+            result.ok().map(|config| config.stop),
+            Some(StopConfig::default())
+        );
+    }
+
+    #[test]
+    fn positive_parse_reads_the_stop_grace_period() {
+        // Given a [stop] section overriding the grace period
+        let input = r#"
+            [stop]
+            grace_period = "20s"
+            "#;
+
+        // When it is parsed
+        let result = Config::parse(input);
+
+        // Then it is read exactly as written
+        let expected = StopConfig {
+            grace_period: Duration::from_secs(20),
+        };
+        assert_eq!(result.ok().map(|config| config.stop), Some(expected));
+    }
+
+    #[test]
+    fn negative_parse_rejects_a_zero_stop_grace_period() {
+        // Given a [stop] section with a zero grace period
+        let input = r#"
+            [stop]
+            grace_period = "0s"
+            "#;
+
+        // When it is parsed
+        let result = Config::parse(input);
+
+        // Then it fails
+        assert!(matches!(
+            result,
+            Err(ConfigError::StopGracePeriodNotPositive)
+        ));
+    }
+
+    #[test]
+    fn negative_parse_rejects_an_unknown_stop_field() {
+        // Given a [stop] section with an unknown field
+        let input = r#"
+            [stop]
+            typo_field = "1s"
             "#;
 
         // When it is parsed

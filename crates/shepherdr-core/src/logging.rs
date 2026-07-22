@@ -1,19 +1,20 @@
 //! Capturing service child process output and rotating the log files.
 
 use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Write as _};
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use std::process::Child;
 use std::sync::{Arc, Mutex, PoisonError};
-use std::thread::{self, JoinHandle};
 use std::{env, io};
 
 use thiserror::Error;
+use tokio::io::{AsyncRead, AsyncReadExt as _};
+use tokio::process::Child;
+use tokio::task::{self, JoinHandle};
 
 /// Per-generation file size cap, in bytes. Defaults to 10 MiB.
 ///
 /// Chosen so a single generation stays a manageable size even under a crash loop that keeps
-/// producing output. Not exposed as a config file field.
+/// producing output.
 pub const DEFAULT_MAX_BYTES: u64 = 10 * 1024 * 1024;
 
 /// Number of generations kept, including the current file. Defaults to 5.
@@ -39,45 +40,42 @@ pub enum LogError {
     },
 }
 
-/// A handle to the log capture threads returned by [`capture`].
+/// A handle to the log capture tasks returned by [`capture`].
 pub struct CaptureHandle {
     stdout: Option<JoinHandle<io::Result<()>>>,
     stderr: Option<JoinHandle<io::Result<()>>>,
 }
 
 impl CaptureHandle {
-    /// Waits for both reader threads to finish.
-    ///
-    /// Each thread exits naturally once the child closes the corresponding stream (EOF on the
-    /// pipe).
+    /// Waits for both reader tasks to finish.
     ///
     /// # Errors
     ///
-    /// Returns an error if a reader thread failed with an I/O error while writing to the log
-    /// file, or if a thread panicked.
-    pub fn join(self) -> io::Result<()> {
-        join_reader(self.stdout)?;
-        join_reader(self.stderr)?;
+    /// Returns an error if a reader task failed while writing to the log file, or if a task
+    /// panicked.
+    pub async fn join(self) -> io::Result<()> {
+        join_reader(self.stdout).await?;
+        join_reader(self.stderr).await?;
         Ok(())
     }
 }
 
-/// Waits for one reader thread and flattens its result.
-fn join_reader(handle: Option<JoinHandle<io::Result<()>>>) -> io::Result<()> {
+/// Waits for one reader task and flattens its result.
+async fn join_reader(handle: Option<JoinHandle<io::Result<()>>>) -> io::Result<()> {
     let Some(handle) = handle else {
         return Ok(());
     };
-    match handle.join() {
+    match handle.await {
         Ok(result) => result,
-        Err(_) => Err(io::Error::other("log capture thread panicked")),
+        Err(_) => Err(io::Error::other("log capture task panicked")),
     }
 }
 
 /// Captures a service's stdout and stderr, writing them to
 /// `~/Library/Logs/shepherdr/<name>.log` with rotation.
 ///
-/// Takes `child`'s stdout and stderr pipes and reads each on its own thread, appending to the
-/// same log file; the two streams end up interleaved in a single file. `max_bytes` and
+/// Takes `child`'s stdout and stderr pipes and reads each on its own task, appending to the same
+/// log file; the two streams end up interleaved in a single file. `max_bytes` and
 /// `max_generations` control the rotation and are normally resolved from the `[log]` config
 /// section (falling back to [`DEFAULT_MAX_BYTES`] and [`DEFAULT_MAX_GENERATIONS`] when unset
 /// there).
@@ -124,25 +122,39 @@ fn log_dir() -> Result<PathBuf, LogError> {
         .join("shepherdr"))
 }
 
-/// Spawns the reader thread for one stream.
+/// Spawns the reader task for one stream.
 ///
-/// Reads blockingly until the pipe hits EOF (the child closes that stream), writing whatever
-/// bytes come through straight to the shared writer.
+/// Reads until the pipe hits EOF (the child closes that stream), handing each chunk off to
+/// [`write_chunk`] for the (blocking) write to the shared writer.
 fn spawn_reader<R>(mut reader: R, writer: Arc<Mutex<RotatingWriter>>) -> JoinHandle<io::Result<()>>
 where
-    R: Read + Send + 'static,
+    R: AsyncRead + Unpin + Send + 'static,
 {
-    thread::spawn(move || {
+    task::spawn(async move {
         let mut buffer = [0_u8; 8192];
         loop {
-            let read = reader.read(&mut buffer)?;
+            let read = reader.read(&mut buffer).await?;
             if read == 0 {
                 return Ok(());
             }
-            let mut writer = writer.lock().unwrap_or_else(PoisonError::into_inner);
-            writer.write_all(&buffer[..read])?;
+            write_chunk(Arc::clone(&writer), buffer[..read].to_vec()).await?;
         }
     })
+}
+
+/// Writes one chunk to the shared writer on the blocking thread pool.
+async fn write_chunk(writer: Arc<Mutex<RotatingWriter>>, chunk: Vec<u8>) -> io::Result<()> {
+    let result = task::spawn_blocking(move || {
+        writer
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .write_all(&chunk)
+    })
+    .await;
+    match result {
+        Ok(result) => result,
+        Err(_) => Err(io::Error::other("log write task panicked")),
+    }
 }
 
 /// An append-only writer that rotates by size cap and generation count.
@@ -221,7 +233,9 @@ impl RotatingWriter {
 
 #[cfg(test)]
 mod tests {
-    use std::process::{Command, Stdio};
+    use std::process::Stdio;
+
+    use tokio::process::Command;
 
     use super::*;
 
@@ -371,8 +385,8 @@ mod tests {
             .expect("child should spawn")
     }
 
-    #[test]
-    fn positive_capture_writes_stdout_to_the_log_file() {
+    #[tokio::test]
+    async fn positive_capture_writes_stdout_to_the_log_file() {
         // Given a child that writes only to stdout
         let dir = scratch_dir("capture-stdout");
         let mut child = piped_child("printf hello");
@@ -386,8 +400,11 @@ mod tests {
             &mut child,
         )
         .expect("capture should succeed");
-        child.wait().expect("child should run");
-        handle.join().expect("reader threads should finish cleanly");
+        child.wait().await.expect("child should run");
+        handle
+            .join()
+            .await
+            .expect("reader tasks should finish cleanly");
 
         // Then the stdout content lands in the log file
         assert_eq!(
@@ -396,8 +413,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn positive_capture_writes_stderr_to_the_log_file() {
+    #[tokio::test]
+    async fn positive_capture_writes_stderr_to_the_log_file() {
         // Given a child that writes only to stderr
         let dir = scratch_dir("capture-stderr");
         let mut child = piped_child("printf oops 1>&2");
@@ -411,8 +428,11 @@ mod tests {
             &mut child,
         )
         .expect("capture should succeed");
-        child.wait().expect("child should run");
-        handle.join().expect("reader threads should finish cleanly");
+        child.wait().await.expect("child should run");
+        handle
+            .join()
+            .await
+            .expect("reader tasks should finish cleanly");
 
         // Then the stderr content lands in the same log file
         assert_eq!(
@@ -421,8 +441,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn positive_capture_handles_a_child_without_a_stderr_pipe() {
+    #[tokio::test]
+    async fn positive_capture_handles_a_child_without_a_stderr_pipe() {
         // Given a child spawned with stdout piped but stderr left unpiped
         let dir = scratch_dir("capture-no-stderr-pipe");
         let mut child = Command::new("sh")
@@ -443,18 +463,21 @@ mod tests {
             &mut child,
         )
         .expect("capture should succeed");
-        child.wait().expect("child should run");
+        child.wait().await.expect("child should run");
 
         // Then it does not block or fail on the missing stderr stream
-        handle.join().expect("reader threads should finish cleanly");
+        handle
+            .join()
+            .await
+            .expect("reader tasks should finish cleanly");
         assert_eq!(
             fs::read_to_string(dir.join("svc.log")).expect("log should be readable"),
             "hello"
         );
     }
 
-    #[test]
-    fn positive_capture_creates_the_missing_log_directory() {
+    #[tokio::test]
+    async fn positive_capture_creates_the_missing_log_directory() {
         // Given a log directory that does not exist yet and a child that produces no output
         let dir = scratch_dir("capture-creates-directory");
         let mut child = piped_child(":");
@@ -468,8 +491,11 @@ mod tests {
             &mut child,
         )
         .expect("capture should succeed");
-        child.wait().expect("child should run");
-        handle.join().expect("reader threads should finish cleanly");
+        child.wait().await.expect("child should run");
+        handle
+            .join()
+            .await
+            .expect("reader tasks should finish cleanly");
 
         // Then the log file exists, empty
         assert_eq!(
@@ -478,8 +504,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn negative_capture_fails_when_the_log_directory_cannot_be_created() {
+    #[tokio::test]
+    async fn negative_capture_fails_when_the_log_directory_cannot_be_created() {
         // Given a path where the "directory" is actually a plain file, blocking create_dir_all
         let dir = scratch_dir("capture-blocked-directory");
         fs::create_dir_all(dir.parent().expect("scratch dir should have a parent"))
@@ -495,7 +521,7 @@ mod tests {
             DEFAULT_MAX_GENERATIONS,
             &mut child,
         );
-        child.wait().expect("child should run");
+        child.wait().await.expect("child should run");
 
         // Then it fails while trying to open the log file
         assert!(matches!(result, Err(LogError::Open { .. })));
