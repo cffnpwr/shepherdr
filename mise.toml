@@ -3,3 +3,21 @@ yamlfmt = "0.21.0"
 tombi = "1.2.4"
 "aqua:numtide/treefmt" = "2.5.0"
 "aqua:taiki-e/cargo-llvm-cov" = "0.8.7"
+bun = "1.3.14"
+"cargo:tauri-cli" = "2.11.4"
+
+[tasks.dev]
+description = "Run Tauri development server"
+run = "cargo tauri dev"
+
+[tasks.build]
+description = "Build Tauri application"
+run = "cargo tauri build"
+
+[tasks.lint]
+description = "Run clippy linter"
+run = "cargo clippy --all-targets --all-features -- -D warnings"
+
+[tasks.fmt]
+description = "Run treefmt"
+run = "treefmt --tree-root . --walk filesystem --fail-on-change"
