@@ -1,0 +1,4 @@
+{
+  "extends": "@cffnpwr/tsconfig/bun",
+  "include": ["vite.config.ts", "eslint.config.ts"]
+}

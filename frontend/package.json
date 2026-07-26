@@ -1,0 +1,30 @@
+{
+  "name": "shepherdr-frontend",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.bun.json",
+    "preview": "vite preview",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@cffnpwr/eslint-config": "2.0.1",
+    "@cffnpwr/tsconfig": "1.0.0",
+    "@types/bun": "1.3.14",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "@typescript-eslint/parser": "8.65.0",
+    "@vitejs/plugin-react": "6.0.4",
+    "eslint": "10.8.0",
+    "globals": "17.8.0",
+    "typescript": "5.9.3",
+    "vite": "8.1.5"
+  }
+}
