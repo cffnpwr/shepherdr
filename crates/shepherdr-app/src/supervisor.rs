@@ -12,10 +12,11 @@ use std::mem;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use rustc_hash::FxHashMap;
-use shepherdr_core::config::{Config, LogConfig, RestartConfig, StopConfig};
+use shepherdr_core::config::{Config, ConfigError, Service};
+use shepherdr_core::reload::{self, Action};
 use shepherdr_core::state::{self, CleanupResult, ServiceCleanup};
 use tauri::async_runtime;
-use tokio::sync::{oneshot, watch};
+use tokio::sync::{Mutex as AsyncMutex, oneshot, watch};
 
 use crate::supervisor::service::{ServiceCommand, ServiceHandle, ServiceTask};
 
@@ -27,7 +28,7 @@ pub enum ServiceState {
     /// No child process, and none will be started until asked.
     Stopped,
     /// The child exited and a restart is pending, waiting out the backoff.
-    Restarting,
+    AwaitingRestart,
     /// Consecutive failures reached the limit; auto-restart stopped.
     Failed,
 }
@@ -50,6 +51,11 @@ struct Inner {
     /// The published [`ServiceStates`]. Held behind an `Arc` so the supervision tasks can publish
     /// into it without holding a reference back to the whole [`Inner`].
     states: Arc<watch::Sender<ServiceStates>>,
+    /// The configuration the running services were built from, and the old side of the next
+    /// reload's diff. The async lock is what serializes the startup flow against reloads and
+    /// reloads against each other: applying a diff spans the stop sequences it triggers, so the
+    /// next diff must not be computed against a configuration that is only half applied.
+    config: AsyncMutex<Config>,
 }
 
 /// The supervision tasks currently registered.
@@ -80,6 +86,7 @@ impl Supervisor {
             inner: Arc::new(Inner {
                 registry: Mutex::new(Registry::default()),
                 states: Arc::new(states),
+                config: AsyncMutex::new(Config::default()),
             }),
         };
 
@@ -124,6 +131,29 @@ impl Supervisor {
         self.command(name, ServiceCommand::Restart);
     }
 
+    /// Reloads the config file and reconciles the running services with it.
+    ///
+    /// Added services are started, removed ones are stopped and taken out of the tray, redefined
+    /// ones are restarted, and ones whose `enabled` flipped are started or stopped, as
+    /// [`reload::plan`] decides. A service that comes out of the diff unchanged keeps running
+    /// untouched.
+    ///
+    /// The global `[log]`, `[restart]`, and `[stop]` sections take effect for every supervision
+    /// task this reload creates. A service that the diff leaves alone keeps the settings it was
+    /// started with, since the reload only ever acts on a service the diff singles out.
+    ///
+    /// # Errors
+    ///
+    /// Returns the error from [`Config::load`] when the new configuration cannot be read, parsed,
+    /// or validated. Nothing is changed in that case: the previous configuration stays applied.
+    pub async fn reload(&self) -> Result<(), ConfigError> {
+        let new = Config::load()?;
+        let mut applied = self.inner.config.lock().await;
+        self.reconcile(&applied, &new).await;
+        *applied = new;
+        Ok(())
+    }
+
     /// Stops every service and waits for all of them to finish.
     ///
     /// The stop sequence is applied to all services concurrently and this only returns once every
@@ -150,40 +180,90 @@ impl Supervisor {
     }
 
     /// Runs the startup flow: clean up the previous run's orphans, then start the services.
+    ///
+    /// The configuration lock is held across the whole flow, so a reload asked for while the app
+    /// is still starting up waits and then diffs against the configuration that was applied,
+    /// rather than starting the same services a second time.
     async fn bootstrap(&self) {
+        let mut applied = self.inner.config.lock().await;
         let config = load_config();
         report_cleanup(&state::cleanup(config.stop.grace_period).await);
-        self.spawn_services(config);
+        self.spawn_services(&config);
+        *applied = config;
     }
 
     /// Registers and starts one supervision task per service defined in `config`.
     ///
     /// Disabled services get a task too, sitting in [`ServiceState::Stopped`], so they show up in
     /// the tray and can be started from there.
-    fn spawn_services(&self, config: Config) {
-        let Config {
-            services,
-            log,
-            restart,
-            stop,
-        } = config;
+    fn spawn_services(&self, config: &Config) {
+        for service in &config.services {
+            self.spawn_service(service.clone(), config);
+        }
+    }
 
+    /// Registers and starts the supervision task for one service, under `config`'s global
+    /// settings. Does nothing once the supervisor is shutting down.
+    fn spawn_service(&self, service: Service, config: &Config) {
         let mut registry = self.registry();
         if registry.shutting_down {
             return;
         }
-        for service in services {
-            let name = service.name.clone();
-            let (handle, task) = ServiceTask::new(
-                service,
-                restart,
-                log.clone(),
-                stop.grace_period,
-                Arc::clone(&self.inner.states),
-            );
-            let _supervision = async_runtime::spawn(task.run());
-            let _replaced = registry.handles.insert(name, handle);
+        let name = service.name.clone();
+        let (handle, task) = ServiceTask::new(
+            service,
+            config.restart,
+            config.log.clone(),
+            config.stop.grace_period,
+            Arc::clone(&self.inner.states),
+        );
+        let _supervision = async_runtime::spawn(task.run());
+        let _replaced = registry.handles.insert(name, handle);
+    }
+
+    /// Applies the difference between the applied configuration and a newly loaded one.
+    async fn reconcile(&self, old: &Config, new: &Config) {
+        let old_services = index(&old.services);
+        let new_services = index(&new.services);
+
+        for (name, action) in reload::plan(old, new) {
+            let defined = new_services.get(name.as_str()).copied();
+            let redefined = old_services.get(name.as_str()) != new_services.get(name.as_str());
+            match effect_of(action, defined.is_some(), redefined) {
+                Effect::Keep => {}
+                Effect::Retire => {
+                    self.retire_service(&name).await;
+                    self.forget_state(&name);
+                }
+                Effect::Respawn => {
+                    self.retire_service(&name).await;
+                    if let Some(service) = defined {
+                        self.spawn_service(service.clone(), new);
+                    }
+                }
+            }
         }
+    }
+
+    /// Takes `name`'s supervision task out of the registry and waits for its stop sequence.
+    ///
+    /// The task is ended rather than merely stopped, because the definition it carries is the one
+    /// that is being replaced or dropped.
+    async fn retire_service(&self, name: &str) {
+        let Some(handle) = self.registry().handles.remove(name) else {
+            return;
+        };
+        let (done, completion) = oneshot::channel();
+        if handle.send(ServiceCommand::Shutdown(done)) {
+            let _stopped = completion.await;
+        }
+    }
+
+    /// Drops `name` from the published states, taking it out of the tray.
+    fn forget_state(&self, name: &str) {
+        self.inner.states.send_modify(|states| {
+            let _removed = states.remove(name);
+        });
     }
 
     /// Sends `command` to `name`'s supervision task, ignoring an unknown name.
@@ -202,6 +282,45 @@ impl Supervisor {
     }
 }
 
+/// What a reload does to one service's supervision task.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Effect {
+    /// Leave the task running as it is.
+    Keep,
+    /// End the task and drop the service from the tray.
+    Retire,
+    /// End the task and register a new one built from the new definition.
+    Respawn,
+}
+
+/// Turns a reload [`Action`] into the effect it has on the supervision task, given whether the
+/// service is still `defined` in the new configuration and whether its definition was changed
+/// (`redefined`) by the reload.
+///
+/// An [`Action`] says what should end up running, but a supervision task carries the definition it
+/// was built with, so anything the action changes has to be rebuilt from the new definition rather
+/// than commanded on the old task. [`Action::NoChange`] therefore still respawns a task whose
+/// definition changed: that case only arises for a service that is disabled on both sides, so
+/// nothing observable is stopped, and the task is left holding the definition a later manual start
+/// would run.
+fn effect_of(action: Action, defined: bool, redefined: bool) -> Effect {
+    if !defined {
+        return Effect::Retire;
+    }
+    if action == Action::NoChange && !redefined {
+        return Effect::Keep;
+    }
+    Effect::Respawn
+}
+
+/// Indexes services by name, for looking a definition up on either side of a reload.
+fn index(services: &[Service]) -> FxHashMap<&str, &Service> {
+    services
+        .iter()
+        .map(|service| (service.name.as_str(), service))
+        .collect()
+}
+
 /// Loads the config file, falling back to a configuration with no services when it cannot be read.
 ///
 /// The config file is the single source of truth for what should run, and nothing about the
@@ -214,12 +333,7 @@ fn load_config() -> Config {
         Ok(config) => config,
         Err(error) => {
             eprintln!("shepherdr: failed to load the configuration: {error}");
-            Config {
-                services: Vec::new(),
-                log: LogConfig::default(),
-                restart: RestartConfig::default(),
-                stop: StopConfig::default(),
-            }
+            Config::default()
         }
     }
 }
@@ -236,5 +350,82 @@ fn report_cleanup(result: &CleanupResult) {
         if let ServiceCleanup::StopFailed(error) = outcome {
             eprintln!("shepherdr: failed to clean up the orphaned process of \"{name}\": {error}");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn positive_effect_of_an_action_on_a_service_no_longer_defined_retires_it() {
+        // Given a service that the new configuration dropped altogether
+        let action = Action::Stop;
+
+        // When the effect on its supervision task is decided
+        let effect = effect_of(action, false, true);
+
+        // Then the task ends and the service leaves the tray
+        assert_eq!(effect, Effect::Retire);
+    }
+
+    #[test]
+    fn positive_effect_of_no_change_on_an_untouched_service_keeps_its_task() {
+        // Given a service the diff singles out for nothing, defined exactly as before
+        let action = Action::NoChange;
+
+        // When the effect on its supervision task is decided
+        let effect = effect_of(action, true, false);
+
+        // Then it keeps running untouched
+        assert_eq!(effect, Effect::Keep);
+    }
+
+    #[test]
+    fn positive_effect_of_no_change_on_a_redefined_service_respawns_its_task() {
+        // Given a service the diff asks nothing of, but whose definition changed
+        let action = Action::NoChange;
+
+        // When the effect on its supervision task is decided
+        let effect = effect_of(action, true, true);
+
+        // Then the task is rebuilt so that it carries the new definition
+        assert_eq!(effect, Effect::Respawn);
+    }
+
+    #[test]
+    fn positive_effect_of_start_respawns_the_task_from_the_new_definition() {
+        // Given a service the diff wants started
+        let action = Action::Start;
+
+        // When the effect on its supervision task is decided
+        let effect = effect_of(action, true, true);
+
+        // Then the task is rebuilt, which is what starts it under the new definition
+        assert_eq!(effect, Effect::Respawn);
+    }
+
+    #[test]
+    fn positive_effect_of_stop_on_a_service_still_defined_respawns_its_task() {
+        // Given a service the diff wants stopped but that the new configuration still defines
+        let action = Action::Stop;
+
+        // When the effect on its supervision task is decided
+        let effect = effect_of(action, true, true);
+
+        // Then the task is rebuilt, disabled, so the service stops yet stays in the tray
+        assert_eq!(effect, Effect::Respawn);
+    }
+
+    #[test]
+    fn positive_effect_of_restart_respawns_the_task_from_the_new_definition() {
+        // Given a service the diff wants restarted
+        let action = Action::Restart;
+
+        // When the effect on its supervision task is decided
+        let effect = effect_of(action, true, true);
+
+        // Then the task is rebuilt, which stops the old definition and starts the new one
+        assert_eq!(effect, Effect::Respawn);
     }
 }

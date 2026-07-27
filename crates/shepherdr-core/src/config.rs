@@ -28,7 +28,11 @@ const DEFAULT_FAILURE_UPTIME_THRESHOLD: Duration = Duration::from_secs(5);
 const DEFAULT_MAX_CONSECUTIVE_FAILURES: u32 = 5;
 
 /// The whole configuration file.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+///
+/// [`Default`] gives the configuration of an empty file: no services and every section at its
+/// own default. It is derived, so it resolves each section exactly as `#[serde(default)]` does
+/// for an omitted section.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     /// The list of service definitions.

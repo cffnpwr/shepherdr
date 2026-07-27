@@ -332,7 +332,7 @@ fn initial_desired_state(enabled: bool) -> DesiredState {
 /// The state to publish for a [`RestartDecision`], and the delay to wait before starting again.
 fn outcome_of(decision: RestartDecision) -> (ServiceState, Option<Duration>) {
     match decision {
-        RestartDecision::RestartAfter(delay) => (ServiceState::Restarting, Some(delay)),
+        RestartDecision::RestartAfter(delay) => (ServiceState::AwaitingRestart, Some(delay)),
         RestartDecision::Failed => (ServiceState::Failed, None),
         RestartDecision::Stopped => (ServiceState::Stopped, None),
     }
@@ -377,7 +377,7 @@ mod tests {
         // Then the service is reported as awaiting a restart, due after that same delay
         assert_eq!(
             outcome,
-            (ServiceState::Restarting, Some(Duration::from_secs(3)))
+            (ServiceState::AwaitingRestart, Some(Duration::from_secs(3)))
         );
     }
 
