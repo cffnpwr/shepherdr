@@ -3016,10 +3016,12 @@ name = "shepherdr-app"
 version = "0.0.0"
 dependencies = [
  "rustc-hash",
+ "serde",
  "shepherdr-core",
  "tauri",
  "tauri-build",
  "tauri-plugin-single-instance",
+ "thiserror 2.0.18",
  "tokio",
 ]
 

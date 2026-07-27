@@ -39,6 +39,16 @@ export default defineConfig([
   },
   {
     files,
-    extends: cffnpwrConfig({ react: true }),
+    extends: cffnpwrConfig({ react: true, tailwind: true }),
+    settings: {
+      // Points eslint-plugin-tailwindcss and eslint-plugin-better-tailwindcss at this project's
+      // Tailwind v4 CSS entry point.
+      tailwindcss: {
+        cssConfigPath: "./src/index.css",
+      },
+      "better-tailwindcss": {
+        entryPoint: "./src/index.css",
+      },
+    },
   },
 ]);

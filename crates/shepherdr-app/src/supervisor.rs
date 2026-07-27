@@ -8,11 +8,11 @@
 
 mod service;
 
-use std::mem;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::{io, mem};
 
 use rustc_hash::FxHashMap;
-use shepherdr_core::config::{Config, ConfigError, Service};
+use shepherdr_core::config::{Config, ConfigError, LogConfig, Service};
 use shepherdr_core::reload::{self, Action};
 use shepherdr_core::state::{self, CleanupResult, ServiceCleanup};
 use tauri::async_runtime;
@@ -106,6 +106,12 @@ impl Supervisor {
     #[must_use]
     pub fn subscribe(&self) -> watch::Receiver<ServiceStates> {
         self.inner.states.subscribe()
+    }
+
+    /// The `[log]` section of the currently applied configuration, for the log window's tail
+    /// poll interval and rotation limits.
+    pub async fn log_config(&self) -> LogConfig {
+        self.inner.config.lock().await.log.clone()
     }
 
     /// Manually starts `name`, resetting its failure counter and backoff so that a failed service
@@ -321,21 +327,36 @@ fn index(services: &[Service]) -> FxHashMap<&str, &Service> {
         .collect()
 }
 
-/// Loads the config file, falling back to a configuration with no services when it cannot be read.
+/// Loads the config file, falling back to a configuration with no services when it cannot be
+/// read, parsed, or validated.
 ///
 /// The config file is the single source of truth for what should run, and nothing about the
-/// running state is persisted, so when the file cannot be read or parsed there is no service
-/// definition left to derive: the supervisor starts nothing. The app itself stays up regardless,
-/// since a missing file is the ordinary first-run case and the tray is what the user needs in
-/// order to fix and reload the configuration.
+/// running state is persisted, so when the file cannot be used there is no service definition
+/// left to derive: the supervisor starts nothing. The app itself stays up regardless, since the
+/// tray is what the user needs in order to fix and reload the configuration.
+///
+/// The file simply not existing yet is the ordinary first-run case, not a failure, so it is
+/// reported as a neutral notice rather than an error; anything else that keeps the file from
+/// loading (a read error other than "not found", a parse failure, a validation failure) is still
+/// reported as one.
 fn load_config() -> Config {
     match Config::load() {
         Ok(config) => config,
+        Err(error) if is_missing(&error) => {
+            eprintln!("shepherdr: configuration file not found; starting with no services");
+            Config::default()
+        }
         Err(error) => {
             eprintln!("shepherdr: failed to load the configuration: {error}");
             Config::default()
         }
     }
+}
+
+/// Whether `error` is just the configuration file not existing yet, rather than a failure to
+/// read, parse, or validate one that does exist.
+fn is_missing(error: &ConfigError) -> bool {
+    matches!(error, ConfigError::Read { source, .. } if source.kind() == io::ErrorKind::NotFound)
 }
 
 /// Reports the orphan-cleanup outcomes that need the user's attention.
@@ -355,6 +376,8 @@ fn report_cleanup(result: &CleanupResult) {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use super::*;
 
     #[test]
@@ -427,5 +450,48 @@ mod tests {
 
         // Then the task is rebuilt, which stops the old definition and starts the new one
         assert_eq!(effect, Effect::Respawn);
+    }
+
+    #[test]
+    fn positive_is_missing_is_true_for_a_read_error_whose_source_is_not_found() {
+        // Given a Read error wrapping a "not found" I/O error, exactly as a missing config file
+        // surfaces from `fs::read_to_string`
+        let error = ConfigError::Read {
+            path: PathBuf::from("/nonexistent/config.toml"),
+            source: io::Error::new(io::ErrorKind::NotFound, "no such file"),
+        };
+
+        // When it is checked
+        let missing = is_missing(&error);
+
+        // Then it is recognized as a missing file, not a real failure
+        assert!(missing);
+    }
+
+    #[test]
+    fn negative_is_missing_is_false_for_a_read_error_of_a_different_kind() {
+        // Given a Read error wrapping some other I/O failure
+        let error = ConfigError::Read {
+            path: PathBuf::from("/config.toml"),
+            source: io::Error::new(io::ErrorKind::PermissionDenied, "denied"),
+        };
+
+        // When it is checked
+        let missing = is_missing(&error);
+
+        // Then it is not treated as a missing file
+        assert!(!missing);
+    }
+
+    #[test]
+    fn negative_is_missing_is_false_for_a_non_read_variant() {
+        // Given an error that has nothing to do with reading the file at all
+        let error = ConfigError::HomeDirNotFound;
+
+        // When it is checked
+        let missing = is_missing(&error);
+
+        // Then it is not treated as a missing file
+        assert!(!missing);
     }
 }

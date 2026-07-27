@@ -1,11 +1,13 @@
 //! Tauri application shell for Shepherdr.
 
+mod logs;
 pub mod supervisor;
 mod tray;
 mod window;
 
 use tauri::{ActivationPolicy, Builder, Manager as _, RunEvent, async_runtime};
 
+use crate::logs::TailRegistry;
 use crate::supervisor::Supervisor;
 
 /// Starts the Tauri application event loop.
@@ -33,11 +35,17 @@ pub fn run() -> tauri::Result<()> {
     let builder = builder.plugin(tauri_plugin_single_instance::init(|_app, _args, _cwd| {}));
 
     let app = builder
+        .invoke_handler(tauri::generate_handler![
+            logs::list_services,
+            logs::tail_log,
+            logs::stop_tail,
+        ])
         .setup(|app| {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(ActivationPolicy::Accessory);
 
             app.manage(Supervisor::start());
+            app.manage(TailRegistry::default());
             tray::setup(app.handle())?;
 
             Ok(())

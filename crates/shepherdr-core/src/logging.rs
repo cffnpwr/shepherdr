@@ -93,6 +93,21 @@ pub fn capture(
     capture_in(&log_dir()?, name, max_bytes, max_generations, child)
 }
 
+/// Resolves `name`'s current log file path (`~/Library/Logs/shepherdr/<name>.log`), for a reader
+/// (such as the log window) that only ever looks at the current generation.
+///
+/// # Errors
+///
+/// Returns an error when the home directory cannot be resolved.
+pub fn log_path(name: &str) -> Result<PathBuf, LogError> {
+    Ok(log_dir()?.join(log_file_name(name)))
+}
+
+/// The current generation's file name for `name`, e.g. `"herdr.log"`.
+fn log_file_name(name: &str) -> String {
+    format!("{name}.log")
+}
+
 /// Captures with an explicit output directory and rotation limits.
 fn capture_in(
     dir: &Path,
@@ -101,7 +116,7 @@ fn capture_in(
     max_generations: u32,
     child: &mut Child,
 ) -> Result<CaptureHandle, LogError> {
-    let path = dir.join(format!("{name}.log"));
+    let path = dir.join(log_file_name(name));
     let writer = RotatingWriter::open(path.clone(), max_bytes, max_generations)
         .map_err(|source| LogError::Open { path, source })?;
     let writer = Arc::new(Mutex::new(writer));
@@ -244,6 +259,23 @@ mod tests {
         let dir = env::temp_dir().join(format!("shepherdr-logging-test-{label}"));
         let _ = fs::remove_dir_all(&dir);
         dir
+    }
+
+    #[test]
+    fn positive_log_path_joins_the_log_directory_and_the_service_name() {
+        // Given a service name
+        let name = "herdr";
+
+        // When its log path is resolved
+        let path = log_path(name).expect("home directory should resolve");
+
+        // Then it names the current generation under the log directory
+        assert_eq!(
+            path,
+            log_dir()
+                .expect("home directory should resolve")
+                .join("herdr.log")
+        );
     }
 
     #[test]
