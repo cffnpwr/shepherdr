@@ -33,14 +33,23 @@ const ICON_RADIUS: i64 = 26;
 pub fn setup(app: &AppHandle) -> tauri::Result<()> {
     let supervisor = app.state::<Supervisor>().inner().clone();
 
+    // Subscribing before building the initial menu is essential, not incidental: whatever the
+    // supervisor has already published by the time this runs only ever reaches a receiver that
+    // existed before it was sent. Subscribing first and reading the initial snapshot back out of
+    // that same receiver (rather than a separate `supervisor.states()` call) guarantees nothing
+    // published between "read the current state" and "start watching for the next change" is
+    // missed: a publish before this point lands in the initial snapshot, and a publish after it
+    // wakes the `changed()` loop below.
+    let mut states = supervisor.subscribe();
+    let initial = states.borrow_and_update().clone();
+
     let _tray = TrayIconBuilder::with_id(TRAY_ID)
         .icon(icon())
         .icon_as_template(true)
-        .menu(&menu::build(app, &supervisor.states())?)
+        .menu(&menu::build(app, &initial)?)
         .on_menu_event(|app, event| dispatch(app, event.id.as_ref()))
         .build(app)?;
 
-    let mut states = supervisor.subscribe();
     let app = app.clone();
     let _refresh = async_runtime::spawn(async move {
         while states.changed().await.is_ok() {
