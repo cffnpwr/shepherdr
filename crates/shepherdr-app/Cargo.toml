@@ -4,11 +4,8 @@ version.workspace = true
 edition.workspace = true
 
 [lib]
+crate-type = ["cdylib", "rlib", "staticlib"]
 name = "shepherdr_app_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
-
-[build-dependencies]
-tauri-build = { version = "2.6.3", features = [] }
 
 [dependencies]
 rustc-hash = "2.1.3"
@@ -20,6 +17,9 @@ tokio = {
   default-features = false,
   features = ["macros", "process", "rt", "sync", "time"]
 }
+
+[build-dependencies]
+tauri-build = { version = "2.6.3", features = [] }
 
 [lints]
 workspace = true

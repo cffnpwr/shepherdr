@@ -181,7 +181,11 @@ impl ServiceTask {
                     }
                 }
             }
-            (None, None) => self.commands.recv().await.map_or(Event::Closed, Event::Command),
+            (None, None) => self
+                .commands
+                .recv()
+                .await
+                .map_or(Event::Closed, Event::Command),
         }
     }
 
