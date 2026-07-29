@@ -3,7 +3,7 @@
 use tauri::{AppHandle, Manager as _, Window, WindowEvent};
 
 /// The label of the window declared in `tauri.conf.json`.
-const MAIN: &str = "main";
+pub const MAIN: &str = "main";
 
 /// Shows the log window and brings it to the front.
 ///

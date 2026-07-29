@@ -2,12 +2,14 @@
 
 mod logs;
 pub mod supervisor;
+#[cfg(target_os = "macos")]
+mod toolbar;
 mod tray;
 mod window;
 
 use tauri::{ActivationPolicy, Builder, Manager as _, RunEvent, async_runtime};
 
-use crate::logs::TailRegistry;
+use crate::logs::{Selection, TailRegistry};
 use crate::supervisor::Supervisor;
 
 /// Starts the Tauri application event loop.
@@ -36,7 +38,7 @@ pub fn run() -> tauri::Result<()> {
 
     let app = builder
         .invoke_handler(tauri::generate_handler![
-            logs::list_services,
+            logs::selected_service,
             logs::tail_log,
             logs::stop_tail,
         ])
@@ -46,7 +48,14 @@ pub fn run() -> tauri::Result<()> {
 
             app.manage(Supervisor::start());
             app.manage(TailRegistry::default());
+            // The toolbar publishes into this, so it has to be managed before the toolbar is set
+            // up, not merely before the frontend can ask for it.
+            app.manage(Selection::default());
             tray::setup(app.handle())?;
+            // The setup hook runs on the main thread, which is where AppKit has to be touched
+            // from; the toolbar is installed here rather than from a later event for that reason.
+            #[cfg(target_os = "macos")]
+            toolbar::setup(app.handle());
 
             Ok(())
         })

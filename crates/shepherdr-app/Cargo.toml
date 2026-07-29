@@ -20,8 +20,36 @@ tokio = {
   features = ["fs", "macros", "process", "rt", "sync", "time"]
 }
 
+# The `test` feature carries `tauri::test::mock_app`, which drives the runtime-generic parts of the
+# toolbar without an event loop. Declared here so it reaches test builds only.
+[dev-dependencies]
+tauri = { version = "2.11.5", features = ["test"] }
+
 [build-dependencies]
 tauri-build = { version = "2.6.3", features = [] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6.4"
+objc2-app-kit = {
+  version = "0.3.2",
+  default-features = false,
+  features = [
+    "NSButton",
+    "NSControl",
+    "NSPopUpButton",
+    "NSResponder",
+    "NSToolbar",
+    "NSToolbarItem",
+    "NSView",
+    "NSWindow",
+    "std"
+  ]
+}
+objc2-foundation = {
+  version = "0.3.2",
+  default-features = false,
+  features = ["NSArray", "NSEnumerator", "NSGeometry", "NSString", "std"]
+}
 
 [lints]
 workspace = true

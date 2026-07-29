@@ -1,5 +1,5 @@
-//! Commands backing the log window: which services can be tailed, and streaming one of their log
-//! files to the frontend as it grows.
+//! The commands backing the log window: which service it is showing, and streaming that service's
+//! log file to the frontend as it grows.
 //!
 //! Tailing is push-based, over a Tauri channel, rather than polled from the frontend: the Tauri
 //! channel is the mechanism the framework recommends for ordered, high-throughput streams such as
@@ -94,18 +94,54 @@ impl TailRegistry {
     }
 }
 
-/// Lists every service name the supervisor currently knows about (from the loaded
-/// configuration), sorted, for the log window's service picker.
+/// The service the log window is showing, as picked in the window's toolbar.
+///
+/// The toolbar reports every change as an event, but Tauri does not replay an event to a listener
+/// that registers after it was emitted, and the first selection is settled while the frontend is
+/// still starting up. Keeping the selection here as well is what lets the frontend read the one it
+/// was not yet listening for. This is also the record of what was last reported, so that the
+/// published selection and the last event can never say different things.
+#[derive(Default)]
+pub struct Selection {
+    current: Mutex<Option<String>>,
+}
+
+impl Selection {
+    /// Records `name` as the selection, answering whether that is a change from what stood before.
+    pub fn update(&self, name: Option<String>) -> bool {
+        let mut current = self.lock();
+        if *current == name {
+            return false;
+        }
+        *current = name;
+        true
+    }
+
+    /// The selection as it stands.
+    #[must_use]
+    pub fn current(&self) -> Option<String> {
+        self.lock().clone()
+    }
+
+    /// Locks the selection, recovering from a poisoned lock rather than propagating the panic.
+    fn lock(&self) -> MutexGuard<'_, Option<String>> {
+        self.current.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+/// The service the log window's toolbar currently has picked, or `null` when the configuration
+/// defines no service to pick.
+///
+/// The frontend reads this once, as it starts up; every later change reaches it as the toolbar's
+/// own event instead.
 #[tauri::command]
 #[allow(
     clippy::needless_pass_by_value,
     reason = "tauri::command parameters are extracted by Tauri's IPC layer, which requires \
               State<T> by value per the framework's own command signature convention"
 )]
-pub fn list_services(supervisor: tauri::State<'_, Supervisor>) -> Vec<String> {
-    let mut names: Vec<String> = supervisor.states().into_keys().collect();
-    names.sort_unstable();
-    names
+pub fn selected_service(selection: tauri::State<'_, Selection>) -> Option<String> {
+    selection.current()
 }
 
 /// Starts tailing `name`'s log file, delivering updates over `on_event`. Replaces whatever this
@@ -150,4 +186,48 @@ pub async fn tail_log(
 )]
 pub fn stop_tail(registry: tauri::State<'_, TailRegistry>) {
     registry.stop();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn positive_update_reports_a_change_when_a_different_service_is_picked() {
+        // Given a selection standing at one service
+        let selection = Selection::default();
+        let _first = selection.update(Some("caddy".to_owned()));
+
+        // When another one is picked
+        let changed = selection.update(Some("redis".to_owned()));
+
+        // Then the change is reported, which is what lets the event go out
+        assert!(changed);
+    }
+
+    #[test]
+    fn negative_update_reports_no_change_when_the_same_service_is_picked_again() {
+        // Given a selection standing at one service
+        let selection = Selection::default();
+        let _first = selection.update(Some("caddy".to_owned()));
+
+        // When a rebuild of the picker's entries settles on that same service
+        let changed = selection.update(Some("caddy".to_owned()));
+
+        // Then nothing is reported, so the rebuild stays quiet
+        assert!(!changed);
+    }
+
+    #[test]
+    fn positive_update_reports_a_change_when_the_last_service_is_gone() {
+        // Given a selection standing at one service
+        let selection = Selection::default();
+        let _first = selection.update(Some("caddy".to_owned()));
+
+        // When a reload leaves the configuration with no service to pick
+        let changed = selection.update(None);
+
+        // Then the change is reported, so the frontend hears that there is nothing to show
+        assert!(changed);
+    }
 }
