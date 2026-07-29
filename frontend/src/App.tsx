@@ -1,47 +1,67 @@
-import { useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import { useEffect, useState } from "react";
 
-import { LogPane } from "@/components/log-pane.tsx";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select.tsx";
-import { useServiceList } from "@/hooks/use-service-list.ts";
+import type { ServiceSelection } from "@/components/log-pane.tsx";
+
+import { LogPane, toSelection } from "@/components/log-pane.tsx";
+
+/** The event the log window's native toolbar (`crate::toolbar`) emits on every picker change. */
+const SELECTION_EVENT = "service-selected";
 
 const App = () => {
-  const services = useServiceList();
-  // No service has been explicitly picked yet: fall back to the first one once the list loads,
-  // without an effect (https://react.dev/learn/you-might-not-need-an-effect).
-  const [chosen, setChosen] = useState<string | null>(null);
-  const selected = chosen ?? services[0] ?? null;
+  // `{ kind: "pending" }` until `selected_service` resolves: the selection may already be
+  // settled by the time this component starts, and treating that gap as `{ kind: "unselected" }`
+  // (see `LogPane`) would flash the wrong empty state whenever a service actually is configured.
+  const [selection, setSelection] = useState<ServiceSelection>({ kind: "pending" });
+
+  useEffect(() => {
+    let cancelled = false;
+    let unlistenFn: (() => void) | undefined;
+    // Guards the reverse race: an event landing while `selected_service`'s response is still in
+    // flight must win over that response once it arrives.
+    let receivedEvent = false;
+
+    const setup = async () => {
+      // `listen`'s own `plugin:event|listen` IPC call has to resolve before the listener is
+      // actually registered (see node_modules/@tauri-apps/api/event.js). Awaiting that before
+      // calling `selected_service` is what closes the gap between the two IPC round trips: an
+      // emit landing there would otherwise reach neither the not-yet-registered listener nor
+      // `selected_service`, which would still answer with the pre-emit value.
+      const unlisten = await listen<string | null>(SELECTION_EVENT, (event) => {
+        receivedEvent = true;
+        setSelection(toSelection(event.payload));
+      });
+
+      if (cancelled) {
+        // Cleanup already ran while `listen` was still resolving, so nothing stored `unlisten`
+        // for it to call; unregister right here instead, so nothing leaks.
+        unlisten();
+        return;
+      }
+      unlistenFn = unlisten;
+
+      const initial = await invoke<string | null>("selected_service");
+      // TypeScript narrows `cancelled` to `false` from the `if (cancelled)` check above and does
+      // not account for the cleanup closure reassigning it while this `await` was suspended, so
+      // it reads this check as always true; it is not -- cleanup can run during that suspension.
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- see comment above
+      if (!cancelled && !receivedEvent) {
+        setSelection(toSelection(initial));
+      }
+    };
+
+    void setup();
+
+    return () => {
+      cancelled = true;
+      unlistenFn?.();
+    };
+  }, []);
 
   return (
-    <main className="flex h-screen flex-col gap-3 p-4">
-      <header className="flex items-center gap-3">
-        {/*
-          Keep `value` as `string | null`, never `?? undefined`: Base UI's Select decides
-          controlled vs. uncontrolled once, from whether `value` is `undefined` on the first
-          render (@base-ui/react/select's useControlled), and does not revisit that decision.
-          `undefined` here on the still-empty-services first render would permanently disconnect
-          the trigger's displayed value from `selected`.
-        */}
-        <Select value={selected} onValueChange={setChosen}>
-          <SelectTrigger>
-            <SelectValue placeholder="サービスを選択" />
-          </SelectTrigger>
-          <SelectContent>
-            {services.map((service) => (
-              <SelectItem key={service} value={service}>
-                {service}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </header>
-
-      {selected !== null && <LogPane key={selected} serviceName={selected} />}
+    <main className="h-screen">
+      <LogPane selection={selection} />
     </main>
   );
 };
