@@ -2,5 +2,14 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
     "github>cffnpwr/renovate-config"
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/(^|/)frontend/src/assets/fonts/0xproto/README\\.md$/"],
+      "matchStrings": ["- Version: `(?<currentValue>[0-9]+\\.[0-9]+)`"],
+      "depNameTemplate": "0xType/0xProto",
+      "datasourceTemplate": "github-releases"
+    }
   ]
 }
