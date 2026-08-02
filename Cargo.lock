@@ -3033,9 +3033,11 @@ name = "shepherdr-core"
 version = "0.0.0"
 dependencies = [
  "bytesize",
+ "chrono",
  "humantime",
  "humantime-serde",
  "libc",
+ "log",
  "nix",
  "rustc-hash",
  "serde",

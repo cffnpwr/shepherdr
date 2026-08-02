@@ -24,3 +24,5 @@ LaunchAgent plistと`config.toml`の内容の定義は本書では扱わない�
 
 - ログウィンドウ（[UI](./ui.md)）から閲覧する。
 - ファイルは`~/Library/Logs/shepherdr/<name>.log`にあり、Console.appや任意のツールでも読める。
+- app自身の診断ログは`~/Library/Logs/shepherdr/app/shepherdr.log`にある（[全体アーキテクチャ](./architecture.md)）。
+- app自身の診断ログはログウィンドウからは閲覧せず、Console.appや任意のツールで直接開く。

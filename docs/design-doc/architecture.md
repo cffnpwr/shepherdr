@@ -53,3 +53,18 @@ launchd (gui domain)
 - サポートする起動経路は`open`（LaunchServices）経由のみとする。自動起動はLaunchAgentが`open /Applications/Shepherdr.app`を実行する形とする。
 - appのクラッシュからの復帰機構はapp側には持たない。クラッシュ後は次回の起動まで無復帰となり、その間サービスは孤児として稼働を続け、次回起動時にクリーンアップされた後、設定に従って起動し直される（[サービス管理](./service-management.md)）。
 - 多重起動はアプリ内ガード（単一インスタンス制御）で抑止する。`open`は`-n`を付けない限り既存インスタンスがあれば新規起動しないが、バイナリ直接実行など非サポート経路で起動された場合も多重化だけは防ぐ。
+
+## app自身のログ
+
+サポートする唯一の起動経路`open`（LaunchServices）で起動されたappは、fd 0/1/2が`/dev/null`に直結する。
+そのため標準エラー出力は、launchdのログやunified loggingに残らない。
+app自身の実行時エラーを事後調査できるよう、appの診断ログをファイルへ永続化する。
+
+- 出力先: `~/Library/Logs/shepherdr/app/shepherdr.log`。
+- サービスの`~/Library/Logs/shepherdr/<name>.log`（[サービス管理](./service-management.md)）とは別ディレクトリに分ける。
+- サービス名の文字種に制約は無く、`shepherdr`という名前のサービスも定義できる。
+- 同一パスを2つのローテーションが独立に扱うと互いのファイルを破壊するため、ディレクトリを分けて衝突を避けている。
+- サイズ上限と世代数によるローテーションを持つ。
+- 上限は実装の既定値（1 MiB × 3世代）に固定し、`[log]`セクションは適用しない。
+- 記録レベルはerror・warn・infoとする。
+
