@@ -13,7 +13,6 @@ use std::{io, mem};
 
 use rustc_hash::FxHashMap;
 use shepherdr_core::config::{Config, ConfigError, LogConfig, Service};
-use shepherdr_core::log;
 use shepherdr_core::logging::error_chain;
 use shepherdr_core::reload::{self, Action};
 use shepherdr_core::state::{self, CleanupResult, ServiceCleanup};

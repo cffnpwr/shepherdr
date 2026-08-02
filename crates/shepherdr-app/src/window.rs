@@ -1,6 +1,5 @@
 //! The log window, which the app keeps alive in the background and raises on request.
 
-use shepherdr_core::log;
 use shepherdr_core::logging::error_chain;
 use tauri::{AppHandle, Manager as _, Window, WindowEvent};
 

@@ -6,7 +6,6 @@
 
 mod menu;
 
-use shepherdr_core::log;
 use shepherdr_core::logging::error_chain;
 use tauri::image::Image;
 use tauri::tray::TrayIconBuilder;

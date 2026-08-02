@@ -12,7 +12,7 @@ use std::time::Duration;
 use shepherdr_core::config::{LogConfig, RestartConfig, Service};
 use shepherdr_core::logging::{self, CaptureHandle};
 use shepherdr_core::monitor::{DesiredState, Monitor, RestartDecision};
-use shepherdr_core::{log, spawn, state, stop};
+use shepherdr_core::{spawn, state, stop};
 use tokio::process::Child;
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::time::{Instant, sleep_until, timeout};

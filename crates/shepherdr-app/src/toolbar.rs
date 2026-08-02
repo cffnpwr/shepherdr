@@ -32,7 +32,6 @@ use objc2_app_kit::{
     NSWindowToolbarStyle,
 };
 use objc2_foundation::{NSArray, NSString};
-use shepherdr_core::log;
 use shepherdr_core::logging::error_chain;
 use tauri::{AppHandle, Emitter as _, Manager as _, Runtime, async_runtime};
 
