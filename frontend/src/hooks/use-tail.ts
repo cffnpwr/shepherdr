@@ -1,12 +1,12 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 
-import type { TailEvent } from "@/lib/tail.ts";
+import type { DisplayedLine, TailEvent } from "@/lib/tail.ts";
 
-import { applyTailEvent } from "@/lib/tail.ts";
+import { applyTailEvent, INITIAL_TAIL_LINES_STATE } from "@/lib/tail.ts";
 
 interface TailState {
-  lines: string[];
+  lines: readonly DisplayedLine[];
   error: string | null;
 }
 
@@ -21,7 +21,7 @@ interface TailState {
  * starting the displayed lines fresh, rather than reconciling the old and new tail's state here.
  */
 export const useTail = (serviceName: string): TailState => {
-  const [lines, setLines] = useState<string[]>([]);
+  const [state, setState] = useState(INITIAL_TAIL_LINES_STATE);
   const [error, setError] = useState<string | null>(null);
   const [resumeToken, setResumeToken] = useState(0);
 
@@ -50,7 +50,7 @@ export const useTail = (serviceName: string): TailState => {
         setError(event.data.message);
         return;
       }
-      setLines((current) => applyTailEvent(current, event));
+      setState((current) => applyTailEvent(current, event));
     };
 
     void invoke("tail_log", { name: serviceName, onEvent: channel }).catch(
@@ -64,5 +64,5 @@ export const useTail = (serviceName: string): TailState => {
     };
   }, [serviceName, resumeToken]);
 
-  return { lines, error };
+  return { lines: state.lines, error };
 };
