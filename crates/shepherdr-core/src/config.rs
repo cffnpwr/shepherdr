@@ -27,8 +27,19 @@ const DEFAULT_FAILURE_UPTIME_THRESHOLD: Duration = Duration::from_secs(5);
 /// Default `max_consecutive_failures`: 5.
 const DEFAULT_MAX_CONSECUTIVE_FAILURES: u32 = 5;
 
+/// Default `tail_poll_interval`: 500 milliseconds.
+///
+/// A middle ground between how quickly the log window's tail catches up to new output and the
+/// idle CPU/IO cost of polling: the log window is read by a human watching for recent output, not
+/// a real-time stream, so sub-second latency is not needed.
+pub const DEFAULT_TAIL_POLL_INTERVAL: Duration = Duration::from_millis(500);
+
 /// The whole configuration file.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+///
+/// [`Default`] gives the configuration of an empty file: no services and every section at its
+/// own default. It is derived, so it resolves each section exactly as `#[serde(default)]` does
+/// for an omitted section.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     /// The list of service definitions.
@@ -73,7 +84,8 @@ const fn default_enabled() -> bool {
 
 /// The optional top-level `[log]` section. Every field falls back to an implementation default
 /// when unset, and the section itself may be omitted entirely. Semantic constraints (a positive
-/// `max_size`, a `max_generations` of at least 1) are checked in [`Config::validate`], not here.
+/// `max_size`, a `max_generations` of at least 1, a positive `tail_poll_interval`) are checked in
+/// [`Config::validate`], not here.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LogConfig {
@@ -86,6 +98,13 @@ pub struct LogConfig {
     /// [`DEFAULT_MAX_GENERATIONS`] when unset.
     #[serde(default = "default_max_generations")]
     pub max_generations: u32,
+    /// How often the log window's tail polls the current log file for new output. Defaults to
+    /// [`DEFAULT_TAIL_POLL_INTERVAL`] when unset.
+    #[serde(
+        default = "default_tail_poll_interval",
+        deserialize_with = "humantime_serde::deserialize"
+    )]
+    pub tail_poll_interval: Duration,
 }
 
 impl Default for LogConfig {
@@ -93,6 +112,7 @@ impl Default for LogConfig {
         Self {
             max_size: default_max_size(),
             max_generations: default_max_generations(),
+            tail_poll_interval: default_tail_poll_interval(),
         }
     }
 }
@@ -103,6 +123,10 @@ const fn default_max_size() -> u64 {
 
 const fn default_max_generations() -> u32 {
     DEFAULT_MAX_GENERATIONS
+}
+
+const fn default_tail_poll_interval() -> Duration {
+    DEFAULT_TAIL_POLL_INTERVAL
 }
 
 /// Deserializes `max_size` from a unit string such as `"10MiB"` or `"10MB"` into its byte
@@ -291,6 +315,9 @@ pub enum ConfigError {
     /// The `[log]` section's `max_generations` is not at least 1.
     #[error("log max_generations must be at least 1")]
     LogMaxGenerationsTooSmall,
+    /// The `[log]` section's `tail_poll_interval` is zero.
+    #[error("log tail_poll_interval must be a positive duration")]
+    LogTailPollIntervalNotPositive,
     /// A `[restart]` duration field is zero.
     #[error("restart.{field} must be a positive duration")]
     RestartValueNotPositive {
@@ -356,6 +383,9 @@ impl Config {
         }
         if self.log.max_generations == 0 {
             return Err(ConfigError::LogMaxGenerationsTooSmall);
+        }
+        if self.log.tail_poll_interval.is_zero() {
+            return Err(ConfigError::LogTailPollIntervalNotPositive);
         }
         if self.stop.grace_period.is_zero() {
             return Err(ConfigError::StopGracePeriodNotPositive);
@@ -556,6 +586,7 @@ mod tests {
         // Then the resolved limits fall back to the implementation defaults
         assert_eq!(result.log.max_size, DEFAULT_MAX_BYTES);
         assert_eq!(result.log.max_generations, DEFAULT_MAX_GENERATIONS);
+        assert_eq!(result.log.tail_poll_interval, DEFAULT_TAIL_POLL_INTERVAL);
     }
 
     #[test]
@@ -565,17 +596,19 @@ mod tests {
             [log]
             max_size = "20MiB"
             max_generations = 3
+            tail_poll_interval = "250ms"
             "#;
 
         // When it is parsed
         let result = Config::parse(input);
 
-        // Then max_size is parsed into bytes and max_generations is read as written
+        // Then every field is parsed as written
         let expected = Config {
             services: vec![],
             log: LogConfig {
                 max_size: 20 * 1024 * 1024,
                 max_generations: 3,
+                tail_poll_interval: Duration::from_millis(250),
             },
             restart: RestartConfig::default(),
             stop: StopConfig::default(),
@@ -594,9 +627,11 @@ mod tests {
         // When it is parsed
         let result = Config::parse(input).expect("parse should succeed");
 
-        // Then max_size still falls back to the default while max_generations is as written
+        // Then the other fields still fall back to their defaults while max_generations is as
+        // written
         assert_eq!(result.log.max_size, DEFAULT_MAX_BYTES);
         assert_eq!(result.log.max_generations, 2);
+        assert_eq!(result.log.tail_poll_interval, DEFAULT_TAIL_POLL_INTERVAL);
     }
 
     #[test]
@@ -707,6 +742,39 @@ mod tests {
             result,
             Err(ConfigError::LogMaxGenerationsTooSmall)
         ));
+    }
+
+    #[test]
+    fn negative_parse_rejects_a_zero_log_tail_poll_interval() {
+        // Given a tail_poll_interval of zero
+        let input = r#"
+            [log]
+            tail_poll_interval = "0ms"
+            "#;
+
+        // When it is parsed
+        let result = Config::parse(input);
+
+        // Then it fails
+        assert!(matches!(
+            result,
+            Err(ConfigError::LogTailPollIntervalNotPositive)
+        ));
+    }
+
+    #[test]
+    fn negative_parse_rejects_a_malformed_log_tail_poll_interval() {
+        // Given a tail_poll_interval string without a recognized unit
+        let input = r#"
+            [log]
+            tail_poll_interval = "not-a-duration"
+            "#;
+
+        // When it is parsed
+        let result = Config::parse(input);
+
+        // Then it fails while parsing TOML
+        assert!(matches!(result, Err(ConfigError::Parse(_))));
     }
 
     #[test]

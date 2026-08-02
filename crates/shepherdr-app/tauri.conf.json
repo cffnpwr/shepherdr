@@ -1,0 +1,31 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Shepherdr",
+  "version": "0.0.0",
+  "identifier": "dev.cffnpwr.shepherdr",
+  "build": {
+    "beforeDevCommand": { "script": "bun run dev", "cwd": "../../frontend" },
+    "devUrl": "http://localhost:5173",
+    "beforeBuildCommand": { "script": "bun run build", "cwd": "../../frontend" },
+    "frontendDist": "../../frontend/dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Shepherdr",
+        "width": 800,
+        "height": 600,
+        "visible": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": []
+  }
+}

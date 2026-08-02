@@ -1,0 +1,266 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource/m-plus-1p";
+
+/* 0xProto: vendored, not on npm/Fontsource. See assets/fonts/0xproto/README.md for version, source and license. */
+@font-face {
+    font-family: "0xProto";
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url("./assets/fonts/0xproto/0xProto-Regular.woff2") format("woff2");
+}
+
+@theme inline {
+    --font-heading: var(--font-sans);
+    --font-mono: '0xProto', 'M PLUS 1p', monospace;
+    --color-sidebar-ring: var(--sidebar-ring);
+    --color-sidebar-border: var(--sidebar-border);
+    --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+    --color-sidebar-accent: var(--sidebar-accent);
+    --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+    --color-sidebar-primary: var(--sidebar-primary);
+    --color-sidebar-foreground: var(--sidebar-foreground);
+    --color-sidebar: var(--sidebar);
+    --color-chart-5: var(--chart-5);
+    --color-chart-4: var(--chart-4);
+    --color-chart-3: var(--chart-3);
+    --color-chart-2: var(--chart-2);
+    --color-chart-1: var(--chart-1);
+    --color-ring: var(--ring);
+    --color-input: var(--input);
+    --color-border: var(--border);
+    --color-destructive: var(--destructive);
+    --color-accent-foreground: var(--accent-foreground);
+    --color-accent: var(--accent);
+    --color-muted-foreground: var(--muted-foreground);
+    --color-muted: var(--muted);
+    --color-secondary-foreground: var(--secondary-foreground);
+    --color-secondary: var(--secondary);
+    --color-primary-foreground: var(--primary-foreground);
+    --color-primary: var(--primary);
+    --color-popover-foreground: var(--popover-foreground);
+    --color-popover: var(--popover);
+    --color-card-foreground: var(--card-foreground);
+    --color-card: var(--card);
+    --color-foreground: var(--foreground);
+    --color-background: var(--background);
+    --radius-sm: calc(var(--radius) * 0.6);
+    --radius-md: calc(var(--radius) * 0.8);
+    --radius-lg: var(--radius);
+    --radius-xl: calc(var(--radius) * 1.4);
+    --radius-2xl: calc(var(--radius) * 1.8);
+    --radius-3xl: calc(var(--radius) * 2.2);
+    --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+:root {
+    /* AppKit semantic colors (aqua / light), macOS 27.0 (26A5388g). */
+    --apple-alternate-selected-control-text-color: rgb(255 255 255);
+    --apple-control-accent-color: rgb(0 122 255);
+    --apple-control-background-color: rgb(255 255 255);
+    --apple-control-color: rgb(255 255 255);
+    --apple-control-text-color: rgb(0 0 0 / 0.847);
+    --apple-disabled-control-text-color: rgb(0 0 0 / 0.247);
+    --apple-find-highlight-color: rgb(255 255 0);
+    --apple-grid-color: rgb(230 230 230);
+    --apple-header-text-color: rgb(0 0 0 / 0.847);
+    --apple-highlight-color: rgb(255 255 255);
+    --apple-keyboard-focus-indicator-color: rgb(0 103 244 / 0.498);
+    --apple-label-color: rgb(0 0 0 / 0.847);
+    --apple-link-color: rgb(0 104 218);
+    --apple-placeholder-text-color: rgb(0 0 0 / 0.498);
+    --apple-quaternary-label-color: rgb(0 0 0 / 0.098);
+    --apple-quinary-label-color: rgb(0 0 0 / 0.047);
+    --apple-secondary-label-color: rgb(0 0 0 / 0.498);
+    --apple-selected-content-background-color: rgb(0 100 225);
+    --apple-selected-control-color: rgb(179 215 255);
+    --apple-selected-control-text-color: rgb(0 0 0 / 0.847);
+    --apple-selected-menu-item-text-color: rgb(255 255 255);
+    --apple-selected-text-background-color: rgb(179 215 255);
+    --apple-selected-text-color: rgb(0 0 0);
+    --apple-separator-color: rgb(0 0 0 / 0.098);
+    --apple-shadow-color: rgb(0 0 0);
+    --apple-system-blue: rgb(0 136 255);
+    --apple-system-brown: rgb(172 127 94);
+    --apple-system-cyan: rgb(0 192 232);
+    --apple-system-gray: rgb(142 142 147);
+    --apple-system-green: rgb(52 199 89);
+    --apple-system-indigo: rgb(97 85 245);
+    --apple-system-mint: rgb(0 200 179);
+    --apple-system-orange: rgb(255 141 40);
+    --apple-system-pink: rgb(255 45 85);
+    --apple-system-purple: rgb(203 48 224);
+    --apple-system-red: rgb(255 56 60);
+    --apple-system-teal: rgb(0 195 208);
+    --apple-system-yellow: rgb(255 204 0);
+    --apple-tertiary-label-color: rgb(0 0 0 / 0.259);
+    --apple-text-background-color: rgb(255 255 255);
+    --apple-text-color: rgb(0 0 0);
+    --apple-text-insertion-point-color: rgb(0 122 255);
+    --apple-under-page-background-color: rgb(246 246 246);
+    --apple-unemphasized-selected-content-background-color: rgb(220 220 220);
+    --apple-unemphasized-selected-text-background-color: rgb(220 220 220);
+    --apple-unemphasized-selected-text-color: rgb(0 0 0);
+    --apple-window-background-color: rgb(255 255 255);
+    --apple-window-frame-text-color: rgb(0 0 0 / 0.847);
+
+    /*
+     * ANSI SGR 16-color palette for the log pane, mapped onto the AppKit palette above so log
+     * colors follow the theme instead of hard-coding a fixed value. black/white are inverted to
+     * the text/background pair rather than literal black/white: a program picks black to mean
+     * "maximum contrast from the background", which on a dark background is white, not black.
+     * Bright variants (90-97 / 100-107) reuse these same colors -- macOS system colors have no
+     * light/dark pair for a single color to draw on.
+     */
+    --ansi-black: var(--apple-text-color);
+    --ansi-red: var(--apple-system-red);
+    --ansi-green: var(--apple-system-green);
+    --ansi-yellow: var(--apple-system-yellow);
+    --ansi-blue: var(--apple-system-blue);
+    --ansi-magenta: var(--apple-system-purple);
+    --ansi-cyan: var(--apple-system-cyan);
+    --ansi-white: var(--apple-text-background-color);
+
+    /* shadcn/ui tokens, mapped from the AppKit palette above. */
+    --background: var(--apple-window-background-color);
+    --foreground: var(--apple-label-color);
+    --card: var(--apple-control-background-color);
+    --card-foreground: var(--apple-label-color);
+    --popover: var(--apple-window-background-color);
+    --popover-foreground: var(--apple-label-color);
+    --primary: var(--apple-control-accent-color);
+    --primary-foreground: var(--apple-alternate-selected-control-text-color);
+    --secondary: var(--apple-control-color);
+    --secondary-foreground: var(--apple-label-color);
+    --muted: var(--apple-under-page-background-color);
+    --muted-foreground: var(--apple-secondary-label-color);
+    --accent: var(--apple-selected-content-background-color);
+    --accent-foreground: var(--apple-selected-menu-item-text-color);
+    --destructive: var(--apple-system-red);
+    --border: var(--apple-separator-color);
+    --input: var(--apple-separator-color);
+    --ring: var(--apple-keyboard-focus-indicator-color);
+
+    /* Not backed by an AppKit semantic color; no chart/sidebar UI exists yet. */
+    --chart-1: oklch(0.87 0 0);
+    --chart-2: oklch(0.556 0 0);
+    --chart-3: oklch(0.439 0 0);
+    --chart-4: oklch(0.371 0 0);
+    --chart-5: oklch(0.269 0 0);
+    --radius: 0.625rem;
+    --sidebar: oklch(0.985 0 0);
+    --sidebar-foreground: oklch(0.145 0 0);
+    --sidebar-primary: oklch(0.205 0 0);
+    --sidebar-primary-foreground: oklch(0.985 0 0);
+    --sidebar-accent: oklch(0.97 0 0);
+    --sidebar-accent-foreground: oklch(0.205 0 0);
+    --sidebar-border: oklch(0.922 0 0);
+    --sidebar-ring: oklch(0.708 0 0);
+
+    /* NSFont.preferredFont(forTextStyle:) type ramp; pointSize/defaultLineHeight in px (1 AppKit point = 1 CSS px). */
+    --apple-type-body-size: 13px;
+    --apple-type-body-line-height: 16.00634765625px;
+    --apple-type-callout-size: 12px;
+    --apple-type-callout-line-height: 15px;
+    --apple-type-caption1-size: 10px;
+    --apple-type-caption1-line-height: 13px;
+    --apple-type-caption2-size: 10px;
+    --apple-type-caption2-line-height: 13px;
+    --apple-type-footnote-size: 10px;
+    --apple-type-footnote-line-height: 13px;
+    --apple-type-headline-size: 13px;
+    --apple-type-headline-line-height: 16px;
+    --apple-type-large-title-size: 26px;
+    --apple-type-large-title-line-height: 32px;
+    --apple-type-subheadline-size: 11px;
+    --apple-type-subheadline-line-height: 14px;
+    --apple-type-title1-size: 22px;
+    --apple-type-title1-line-height: 26px;
+    --apple-type-title2-size: 17px;
+    --apple-type-title2-line-height: 22px;
+    --apple-type-title3-size: 15px;
+    --apple-type-title3-line-height: 20px;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        /* AppKit semantic colors (darkAqua), macOS 27.0 (26A5388g). */
+        --apple-alternate-selected-control-text-color: rgb(255 255 255);
+        --apple-control-accent-color: rgb(0 122 255);
+        --apple-control-background-color: rgb(30 30 30);
+        --apple-control-color: rgb(255 255 255 / 0.247);
+        --apple-control-text-color: rgb(255 255 255 / 0.847);
+        --apple-disabled-control-text-color: rgb(255 255 255 / 0.247);
+        --apple-find-highlight-color: rgb(255 255 0);
+        --apple-grid-color: rgb(26 26 26);
+        --apple-header-text-color: rgb(255 255 255);
+        --apple-highlight-color: rgb(180 180 180);
+        --apple-keyboard-focus-indicator-color: rgb(26 169 255 / 0.498);
+        --apple-label-color: rgb(255 255 255 / 0.847);
+        --apple-link-color: rgb(65 156 255);
+        --apple-placeholder-text-color: rgb(255 255 255 / 0.549);
+        --apple-quaternary-label-color: rgb(255 255 255 / 0.098);
+        --apple-quinary-label-color: rgb(255 255 255 / 0.047);
+        --apple-secondary-label-color: rgb(255 255 255 / 0.549);
+        --apple-selected-content-background-color: rgb(0 89 209);
+        --apple-selected-control-color: rgb(63 99 139);
+        --apple-selected-control-text-color: rgb(255 255 255 / 0.847);
+        --apple-selected-menu-item-text-color: rgb(255 255 255);
+        --apple-selected-text-background-color: rgb(63 99 139);
+        --apple-selected-text-color: rgb(255 255 255);
+        --apple-separator-color: rgb(255 255 255 / 0.098);
+        --apple-shadow-color: rgb(0 0 0);
+        --apple-system-blue: rgb(0 145 255);
+        --apple-system-brown: rgb(183 138 102);
+        --apple-system-cyan: rgb(60 211 254);
+        --apple-system-gray: rgb(152 152 157);
+        --apple-system-green: rgb(48 209 88);
+        --apple-system-indigo: rgb(109 124 255);
+        --apple-system-mint: rgb(0 218 195);
+        --apple-system-orange: rgb(255 146 48);
+        --apple-system-pink: rgb(255 55 95);
+        --apple-system-purple: rgb(219 52 242);
+        --apple-system-red: rgb(255 66 69);
+        --apple-system-teal: rgb(0 210 224);
+        --apple-system-yellow: rgb(255 214 0);
+        --apple-tertiary-label-color: rgb(255 255 255 / 0.247);
+        --apple-text-background-color: rgb(30 30 30);
+        --apple-text-color: rgb(255 255 255);
+        --apple-text-insertion-point-color: rgb(0 122 255);
+        --apple-under-page-background-color: rgb(40 40 40);
+        --apple-unemphasized-selected-content-background-color: rgb(70 70 70);
+        --apple-unemphasized-selected-text-background-color: rgb(70 70 70);
+        --apple-unemphasized-selected-text-color: rgb(255 255 255);
+        --apple-window-background-color: rgb(30 30 30);
+        --apple-window-frame-text-color: rgb(255 255 255 / 0.847);
+
+        /* Not backed by an AppKit semantic color; no chart/sidebar UI exists yet. */
+        --chart-1: oklch(0.87 0 0);
+        --chart-2: oklch(0.556 0 0);
+        --chart-3: oklch(0.439 0 0);
+        --chart-4: oklch(0.371 0 0);
+        --chart-5: oklch(0.269 0 0);
+        --sidebar: oklch(0.205 0 0);
+        --sidebar-foreground: oklch(0.985 0 0);
+        --sidebar-primary: oklch(0.488 0.243 264.376);
+        --sidebar-primary-foreground: oklch(0.985 0 0);
+        --sidebar-accent: oklch(0.269 0 0);
+        --sidebar-accent-foreground: oklch(0.985 0 0);
+        --sidebar-border: oklch(1 0 0 / 10%);
+        --sidebar-ring: oklch(0.556 0 0);
+    }
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+    }
+  body {
+    @apply bg-background text-foreground;
+    }
+  html {
+    @apply font-sans;
+    }
+}
