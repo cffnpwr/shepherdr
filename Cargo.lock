@@ -3015,6 +3015,7 @@ dependencies = [
 name = "shepherdr-app"
 version = "0.0.0"
 dependencies = [
+ "log",
  "objc2",
  "objc2-app-kit",
  "objc2-foundation",
@@ -3033,9 +3034,11 @@ name = "shepherdr-core"
 version = "0.0.0"
 dependencies = [
  "bytesize",
+ "chrono",
  "humantime",
  "humantime-serde",
  "libc",
+ "log",
  "nix",
  "rustc-hash",
  "serde",

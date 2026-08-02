@@ -1,5 +1,6 @@
 //! The log window, which the app keeps alive in the background and raises on request.
 
+use shepherdr_core::logging::error_chain;
 use tauri::{AppHandle, Manager as _, Window, WindowEvent};
 
 /// The label of the window declared in `tauri.conf.json`.
@@ -11,15 +12,18 @@ pub const MAIN: &str = "main";
 /// show rather than a create: the webview it holds survives being dismissed.
 pub fn open_logs(app: &AppHandle) {
     let Some(window) = app.get_webview_window(MAIN) else {
-        eprintln!("shepherdr: the log window is not available");
+        log::error!("the log window is not available");
         return;
     };
     if let Err(error) = window.show() {
-        eprintln!("shepherdr: failed to show the log window: {error}");
+        log::error!("failed to show the log window: {}", error_chain(&error));
         return;
     }
     if let Err(error) = window.set_focus() {
-        eprintln!("shepherdr: failed to bring the log window to the front: {error}");
+        log::warn!(
+            "failed to bring the log window to the front: {}",
+            error_chain(&error)
+        );
     }
 }
 
@@ -38,6 +42,6 @@ pub fn hide_on_close(window: &Window, event: &WindowEvent) {
     }
     api.prevent_close();
     if let Err(error) = window.hide() {
-        eprintln!("shepherdr: failed to hide the log window: {error}");
+        log::error!("failed to hide the log window: {}", error_chain(&error));
     }
 }

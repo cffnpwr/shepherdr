@@ -7,6 +7,7 @@ mod toolbar;
 mod tray;
 mod window;
 
+use shepherdr_core::logging;
 use tauri::{ActivationPolicy, Builder, Manager as _, RunEvent, async_runtime};
 
 use crate::logs::{Selection, TailRegistry};
@@ -25,11 +26,16 @@ use crate::supervisor::Supervisor;
 /// declared invisible in `tauri.conf.json` and only ever shown from the tray, and closing it hides
 /// it again instead of ending the app.
 ///
+/// The app's own `log` logger is installed first, before anything else, so that a failure in
+/// [`Supervisor::start`] loading `config.toml` is itself recorded rather than lost.
+///
 /// # Errors
 ///
 /// Returns an error if the Tauri application fails to initialize.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() -> tauri::Result<()> {
+    logging::init_app_logger();
+
     let builder = Builder::default();
     // Nothing to do in the first instance: the second instance exits on its own without having
     // touched a service, and the tray of the instance already running stays where it is.

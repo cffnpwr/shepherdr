@@ -6,6 +6,7 @@
 
 mod menu;
 
+use shepherdr_core::logging::error_chain;
 use tauri::image::Image;
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Manager as _, async_runtime};
@@ -71,17 +72,17 @@ fn refresh(app: &AppHandle, states: &ServiceStates) {
     match menu::build(app, states) {
         Ok(menu) => {
             if let Err(error) = tray.set_menu(Some(menu)) {
-                eprintln!("shepherdr: failed to update the tray menu: {error}");
+                log::error!("failed to update the tray menu: {}", error_chain(&error));
             }
         }
-        Err(error) => eprintln!("shepherdr: failed to build the tray menu: {error}"),
+        Err(error) => log::error!("failed to build the tray menu: {}", error_chain(&error)),
     }
 }
 
 /// Carries out the click on the menu item with the given identifier.
 fn dispatch(app: &AppHandle, id: &str) {
     let Some(action) = menu::action_of(id) else {
-        eprintln!("shepherdr: ignored a click on the unknown tray menu item \"{id}\"");
+        log::warn!("ignored a click on the unknown tray menu item \"{id}\"");
         return;
     };
     let supervisor = app.state::<Supervisor>();
@@ -95,7 +96,10 @@ fn dispatch(app: &AppHandle, id: &str) {
             let supervisor = supervisor.inner().clone();
             let _reload = async_runtime::spawn(async move {
                 if let Err(error) = supervisor.reload().await {
-                    eprintln!("shepherdr: failed to reload the configuration: {error}");
+                    log::error!(
+                        "failed to reload the configuration: {}",
+                        error_chain(&error)
+                    );
                 }
             });
         }

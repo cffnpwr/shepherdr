@@ -8,22 +8,22 @@ crate-type = ["cdylib", "rlib", "staticlib"]
 name = "shepherdr_app_lib"
 
 [dependencies]
-rustc-hash = "2.1.3"
-serde = { version = "1.0.228", features = ["derive"] }
+log.workspace = true
+rustc-hash.workspace = true
+serde.workspace = true
 shepherdr-core = { path = "../shepherdr-core" }
-tauri = { version = "2.11.5", features = ["tray-icon"] }
+tauri = { workspace = true, features = ["tray-icon"] }
 tauri-plugin-single-instance = "2.4.3"
-thiserror = "2.0.18"
+thiserror.workspace = true
 tokio = {
-  version = "1.53.1",
-  default-features = false,
+  workspace = true,
   features = ["fs", "macros", "process", "rt", "sync", "time"]
 }
 
 # The `test` feature carries `tauri::test::mock_app`, which drives the runtime-generic parts of the
 # toolbar without an event loop. Declared here so it reaches test builds only.
 [dev-dependencies]
-tauri = { version = "2.11.5", features = ["test"] }
+tauri = { workspace = true, features = ["test"] }
 
 [build-dependencies]
 tauri-build = { version = "2.6.3", features = [] }

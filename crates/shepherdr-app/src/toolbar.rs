@@ -32,6 +32,7 @@ use objc2_app_kit::{
     NSWindowToolbarStyle,
 };
 use objc2_foundation::{NSArray, NSString};
+use shepherdr_core::logging::error_chain;
 use tauri::{AppHandle, Emitter as _, Manager as _, Runtime, async_runtime};
 
 use crate::logs::Selection;
@@ -203,7 +204,7 @@ thread_local! {
 /// having a toolbar.
 pub fn setup(app: &AppHandle) {
     let Some(mtm) = MainThreadMarker::new() else {
-        eprintln!("shepherdr: the log window toolbar can only be installed on the main thread");
+        log::error!("the log window toolbar can only be installed on the main thread");
         return;
     };
     let Some(ns_window) = log_window(app, mtm) else {
@@ -252,20 +253,26 @@ fn refresh(app: &AppHandle, names: Vec<String>) {
         });
     });
     if let Err(error) = scheduled {
-        eprintln!("shepherdr: failed to update the log window toolbar: {error}");
+        log::error!(
+            "failed to update the log window toolbar: {}",
+            error_chain(&error)
+        );
     }
 }
 
 /// The `NSWindow` behind the log window, or `None` when it cannot be reached.
 fn log_window(app: &AppHandle, _mtm: MainThreadMarker) -> Option<Retained<NSWindow>> {
     let Some(webview) = app.get_webview_window(window::MAIN) else {
-        eprintln!("shepherdr: the log window is not available");
+        log::error!("the log window is not available");
         return None;
     };
     let pointer = match webview.ns_window() {
         Ok(pointer) => pointer.cast::<NSWindow>(),
         Err(error) => {
-            eprintln!("shepherdr: failed to reach the log window's NSWindow: {error}");
+            log::error!(
+                "failed to reach the log window's NSWindow: {}",
+                error_chain(&error)
+            );
             return None;
         }
     };
@@ -332,7 +339,10 @@ fn publish<R: Runtime>(app: &AppHandle<R>, selected: Option<String>) {
         return;
     }
     if let Err(error) = app.emit(SELECTION_EVENT, selected) {
-        eprintln!("shepherdr: failed to report the picked service: {error}");
+        log::error!(
+            "failed to report the picked service: {}",
+            error_chain(&error)
+        );
     }
 }
 
