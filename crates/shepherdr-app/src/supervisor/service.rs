@@ -12,7 +12,7 @@ use std::time::Duration;
 use shepherdr_core::config::{LogConfig, RestartConfig, Service};
 use shepherdr_core::logging::{self, CaptureHandle};
 use shepherdr_core::monitor::{DesiredState, Monitor, RestartDecision};
-use shepherdr_core::{spawn, state, stop};
+use shepherdr_core::{log, spawn, state, stop};
 use tokio::process::Child;
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::time::{Instant, sleep_until, timeout};
@@ -161,9 +161,10 @@ impl ServiceTask {
                 tokio::select! {
                     result = running.child.wait() => {
                         if let Err(error) = result {
-                            eprintln!(
-                                "shepherdr: failed to wait for service \"{}\": {error}",
-                                self.service.name
+                            log::error!(
+                                "failed to wait for service \"{}\": {}",
+                                self.service.name,
+                                logging::error_chain(&error)
                             );
                         }
                         Event::Exited
@@ -203,17 +204,19 @@ impl ServiceTask {
         let mut child = match spawn::spawn(&self.service) {
             Ok(child) => child,
             Err(error) => {
-                eprintln!(
-                    "shepherdr: failed to spawn service \"{}\": {error}",
-                    self.service.name
+                log::error!(
+                    "failed to spawn service \"{}\": {}",
+                    self.service.name,
+                    logging::error_chain(&error)
                 );
                 return self.record_exit(Duration::ZERO);
             }
         };
         if let Err(error) = state::record(&self.service.name, &child) {
-            eprintln!(
-                "shepherdr: failed to record the cleanup state of \"{}\": {error}",
-                self.service.name
+            log::warn!(
+                "failed to record the cleanup state of \"{}\": {}",
+                self.service.name,
+                logging::error_chain(&error)
             );
         }
         let capture = match logging::capture(
@@ -224,9 +227,10 @@ impl ServiceTask {
         ) {
             Ok(capture) => Some(capture),
             Err(error) => {
-                eprintln!(
-                    "shepherdr: failed to capture the logs of \"{}\": {error}",
-                    self.service.name
+                log::warn!(
+                    "failed to capture the logs of \"{}\": {}",
+                    self.service.name,
+                    logging::error_chain(&error)
                 );
                 None
             }
@@ -255,9 +259,10 @@ impl ServiceTask {
         if let Some(running) = self.running.as_mut()
             && let Err(error) = stop::stop(&mut running.child, self.grace_period).await
         {
-            eprintln!(
-                "shepherdr: failed to stop service \"{}\": {error}",
-                self.service.name
+            log::error!(
+                "failed to stop service \"{}\": {}",
+                self.service.name,
+                logging::error_chain(&error)
             );
         }
         let _uptime = self.finish_run().await;
@@ -280,20 +285,22 @@ impl ServiceTask {
             return Duration::ZERO;
         };
         if let Err(error) = state::forget(&self.service.name) {
-            eprintln!(
-                "shepherdr: failed to drop the cleanup state of \"{}\": {error}",
-                self.service.name
+            log::warn!(
+                "failed to drop the cleanup state of \"{}\": {}",
+                self.service.name,
+                logging::error_chain(&error)
             );
         }
         if let Some(capture) = running.capture {
             match timeout(self.grace_period, capture.join()).await {
                 Ok(Ok(())) => {}
-                Ok(Err(error)) => eprintln!(
-                    "shepherdr: failed to capture the logs of \"{}\": {error}",
-                    self.service.name
+                Ok(Err(error)) => log::warn!(
+                    "failed to capture the logs of \"{}\": {}",
+                    self.service.name,
+                    logging::error_chain(&error)
                 ),
-                Err(_elapsed) => eprintln!(
-                    "shepherdr: gave up draining the logs of \"{}\": something still holds its output pipe",
+                Err(_elapsed) => log::warn!(
+                    "gave up draining the logs of \"{}\": something still holds its output pipe",
                     self.service.name
                 ),
             }

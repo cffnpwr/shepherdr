@@ -49,14 +49,27 @@ pub enum LogError {
 }
 
 /// Renders `error`'s message together with its full [`Error::source`] chain, each cause appended
-/// after `"; caused by: "`.
+/// after `"; caused by: "` — unless that cause's text is already present in the message built up
+/// so far, in which case it is skipped rather than repeated.
 ///
 /// [`LogError::Open`] and `shepherdr_core::config::ConfigError::Read` (and any other error variant
 /// built from `#[error(...)]` plus a bare `#[source]`, without `{source}` in the format string)
 /// omit the wrapped cause from their `Display` output by design, per `thiserror`'s distinction
 /// between the two attributes. For a log record meant to support after-the-fact diagnosis, that
-/// drops exactly the detail worth keeping (a `PermissionDenied`, `NotFound`, and the like). Call
-/// sites that want the full cause in the record should format the error through this function
+/// drops exactly the detail worth keeping (a `PermissionDenied`, `NotFound`, and the like); this
+/// function fills that gap back in.
+///
+/// Other error types take the opposite approach and already fold the cause into their own
+/// `Display` — for example `tauri::Error::Runtime(#[from] tauri_runtime::Error)`, formatted as
+/// `"runtime error: {0}"`, or `tauri::Error::Io(#[from] std::io::Error)`, formatted as `"{0}"`
+/// (equivalent to `#[error(transparent)]`). Calling this function on those is safe: each candidate
+/// cause is checked against the message accumulated so far (including causes already appended
+/// earlier in the chain) and dropped once its text is already present, so the result never repeats
+/// a cause `Display` already spelled out. That makes it safe to call at every call site with an
+/// error value, without the caller having to know whether the concrete error type already includes
+/// its cause.
+///
+/// Call sites that want the full cause in the record should format the error through this function
 /// instead of `{err}` alone.
 ///
 /// ```no_run
@@ -74,8 +87,11 @@ where
     let mut message = error.to_string();
     let mut cause = error.source();
     while let Some(err) = cause {
-        message.push_str("; caused by: ");
-        message.push_str(&err.to_string());
+        let text = err.to_string();
+        if !message.contains(&text) {
+            message.push_str("; caused by: ");
+            message.push_str(&text);
+        }
         cause = err.source();
     }
     message
@@ -295,6 +311,7 @@ impl RotatingWriter {
 
 #[cfg(test)]
 mod tests {
+    use std::fmt::{self, Display, Formatter};
     use std::process::Stdio;
 
     use tokio::process::Command;
@@ -634,5 +651,78 @@ mod tests {
 
         // Then it is just the top-level message, with no "caused by" appended
         assert_eq!(message, "failed to resolve the home directory");
+    }
+
+    /// A minimal cause for the `error_chain` tests below, standing in for whatever concrete
+    /// error type a real cause would be.
+    #[derive(Debug)]
+    struct StubCause;
+
+    impl Display for StubCause {
+        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+            write!(f, "stub cause")
+        }
+    }
+
+    impl Error for StubCause {}
+
+    /// An error whose own `Display` already folds its cause's message into a larger sentence,
+    /// the way `tauri::Error::Runtime(#[from] tauri_runtime::Error)`'s `"runtime error: {0}"`
+    /// does.
+    #[derive(Debug)]
+    struct FoldsCauseIntoMessage(StubCause);
+
+    impl Display for FoldsCauseIntoMessage {
+        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+            write!(f, "outer failure: {}", self.0)
+        }
+    }
+
+    impl Error for FoldsCauseIntoMessage {
+        fn source(&self) -> Option<&(dyn Error + 'static)> {
+            Some(&self.0)
+        }
+    }
+
+    /// An error whose `Display` is exactly its cause's message, the way
+    /// `tauri::Error::Io(#[from] std::io::Error)`'s `"{0}"` (`#[error(transparent)]` in effect)
+    /// does.
+    #[derive(Debug)]
+    struct TransparentOverCause(StubCause);
+
+    impl Display for TransparentOverCause {
+        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+            write!(f, "{}", self.0)
+        }
+    }
+
+    impl Error for TransparentOverCause {
+        fn source(&self) -> Option<&(dyn Error + 'static)> {
+            Some(&self.0)
+        }
+    }
+
+    #[test]
+    fn positive_error_chain_skips_a_cause_already_folded_into_the_parent_message() {
+        // Given an error whose own Display already includes its cause's message
+        let err = FoldsCauseIntoMessage(StubCause);
+
+        // When its chain is rendered
+        let message = error_chain(&err);
+
+        // Then the cause is not appended a second time
+        assert_eq!(message, "outer failure: stub cause");
+    }
+
+    #[test]
+    fn positive_error_chain_reports_a_single_message_when_display_is_transparent_over_the_cause() {
+        // Given an error whose Display is exactly its cause's message
+        let err = TransparentOverCause(StubCause);
+
+        // When its chain is rendered
+        let message = error_chain(&err);
+
+        // Then the message is the cause's text alone, not doubled
+        assert_eq!(message, "stub cause");
     }
 }

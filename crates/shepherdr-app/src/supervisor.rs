@@ -13,6 +13,8 @@ use std::{io, mem};
 
 use rustc_hash::FxHashMap;
 use shepherdr_core::config::{Config, ConfigError, LogConfig, Service};
+use shepherdr_core::log;
+use shepherdr_core::logging::error_chain;
 use shepherdr_core::reload::{self, Action};
 use shepherdr_core::state::{self, CleanupResult, ServiceCleanup};
 use tauri::async_runtime;
@@ -343,11 +345,11 @@ fn load_config() -> Config {
     match Config::load() {
         Ok(config) => config,
         Err(error) if is_missing(&error) => {
-            eprintln!("shepherdr: configuration file not found; starting with no services");
+            log::info!("configuration file not found; starting with no services");
             Config::default()
         }
         Err(error) => {
-            eprintln!("shepherdr: failed to load the configuration: {error}");
+            log::error!("failed to load the configuration: {}", error_chain(&error));
             Config::default()
         }
     }
@@ -369,7 +371,10 @@ fn report_cleanup(result: &CleanupResult) {
     };
     for (name, outcome) in outcomes {
         if let ServiceCleanup::StopFailed(error) = outcome {
-            eprintln!("shepherdr: failed to clean up the orphaned process of \"{name}\": {error}");
+            log::error!(
+                "failed to clean up the orphaned process of \"{name}\": {}",
+                error_chain(error)
+            );
         }
     }
 }
