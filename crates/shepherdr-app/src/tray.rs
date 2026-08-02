@@ -19,10 +19,15 @@ use crate::window;
 /// rebuilt.
 const TRAY_ID: &str = "shepherdr";
 
-/// Side length of the generated tray icon, in pixels.
-const ICON_SIZE: u32 = 32;
-/// Radius of the disc drawn on the tray icon, in half-pixels, so 13 pixels.
-const ICON_RADIUS: i64 = 26;
+/// The menu bar icon, embedded in the binary so that it cannot go missing at runtime.
+///
+/// It is a template image: black on transparent. Paired with `icon_as_template`, macOS ignores the
+/// colour and renders the alpha channel in the menu bar's own foreground colour, so the shape
+/// follows the light and dark appearances without a second asset.
+///
+/// The image is drawn at a height of 18 points whatever its size, so it is authored at twice that
+/// to stay sharp on a Retina display.
+const ICON: &[u8] = include_bytes!("../icons/tray.png");
 
 /// Installs the tray icon and keeps its menu in step with the supervisor.
 ///
@@ -30,7 +35,7 @@ const ICON_RADIUS: i64 = 26;
 ///
 /// # Errors
 ///
-/// Returns an error when the tray icon or its initial menu cannot be created.
+/// Returns an error when the tray icon, its image, or its initial menu cannot be created.
 pub fn setup(app: &AppHandle) -> tauri::Result<()> {
     let supervisor = app.state::<Supervisor>().inner().clone();
 
@@ -45,7 +50,7 @@ pub fn setup(app: &AppHandle) -> tauri::Result<()> {
     let initial = states.borrow_and_update().clone();
 
     let _tray = TrayIconBuilder::with_id(TRAY_ID)
-        .icon(icon())
+        .icon(Image::from_bytes(ICON)?)
         .icon_as_template(true)
         .menu(&menu::build(app, &initial)?)
         .on_menu_event(|app, event| dispatch(app, event.id.as_ref()))
@@ -110,62 +115,41 @@ fn dispatch(app: &AppHandle, id: &str) {
     }
 }
 
-/// Draws the tray icon: an opaque black disc on a transparent field, generated rather than loaded.
-///
-/// Paired with `icon_as_template`, macOS ignores the colour and renders the alpha channel in the
-/// menu bar's own foreground colour, so the shape follows the light and dark appearances without a
-/// second asset.
-fn icon() -> Image<'static> {
-    let mut rgba = Vec::new();
-    for y in 0..ICON_SIZE {
-        for x in 0..ICON_SIZE {
-            // Measured in half-pixels, a pixel's centre lands on an integer and the disc needs no
-            // rounding: the centre of the image is at (ICON_SIZE, ICON_SIZE).
-            let dx = i64::from(x) * 2 + 1 - i64::from(ICON_SIZE);
-            let dy = i64::from(y) * 2 + 1 - i64::from(ICON_SIZE);
-            let alpha = if dx * dx + dy * dy <= ICON_RADIUS * ICON_RADIUS {
-                u8::MAX
-            } else {
-                0
-            };
-            rgba.extend_from_slice(&[0, 0, 0, alpha]);
-        }
-    }
-    Image::new_owned(rgba, ICON_SIZE, ICON_SIZE)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// Height of the tray icon asset in pixels, being the 18 points it is drawn at on a display
+    /// with a scale factor of two.
+    const ICON_HEIGHT: u32 = 36;
+
     #[test]
-    fn positive_icon_covers_the_declared_size_with_one_rgba_pixel_each() {
-        // Given the generated tray icon
-        let image = icon();
+    fn positive_icon_decodes_at_the_height_the_menu_bar_is_drawn_at() {
+        // Given the embedded tray icon asset
+        let image = Image::from_bytes(ICON).expect("the tray icon should decode");
 
-        // When its dimensions and buffer length are read
-        let dimensions = (image.width(), image.height(), image.rgba().len());
+        // When its height and buffer length are read
+        let measurements = (image.height(), image.rgba().len());
 
-        // Then the buffer holds exactly four bytes per pixel of the declared size
-        let pixels = ICON_SIZE as usize * ICON_SIZE as usize;
-        assert_eq!(dimensions, (ICON_SIZE, ICON_SIZE, pixels * 4));
+        // Then it is authored at twice the 18 point drawing height, with four bytes per pixel
+        let pixels = image.width() as usize * ICON_HEIGHT as usize;
+        assert_eq!(measurements, (ICON_HEIGHT, pixels * 4));
     }
 
     #[test]
-    fn positive_icon_is_opaque_at_its_centre_and_transparent_at_its_corner() {
-        // Given the generated tray icon
-        let image = icon();
-        let rgba = image.rgba();
-        let alpha_at = |x: u32, y: u32| {
-            let index = (y as usize * ICON_SIZE as usize + x as usize) * 4 + 3;
-            rgba.get(index).copied()
-        };
+    fn positive_icon_carries_a_shape_in_its_alpha_channel() {
+        // Given the embedded tray icon asset, which macOS draws from its alpha channel alone
+        let image = Image::from_bytes(ICON).expect("the tray icon should decode");
 
-        // When the alpha of the centre pixel and of a corner pixel are read
-        let centre = alpha_at(ICON_SIZE / 2, ICON_SIZE / 2);
-        let corner = alpha_at(0, 0);
+        // When the fully opaque and the fully transparent pixels are counted
+        let alpha = image.rgba().iter().skip(3).step_by(4);
+        let (opaque, clear) = alpha.fold((0_usize, 0_usize), |(opaque, clear), &a| match a {
+            u8::MAX => (opaque + 1, clear),
+            0 => (opaque, clear + 1),
+            _ => (opaque, clear),
+        });
 
-        // Then the disc is drawn in the middle and the corner stays clear
-        assert_eq!((centre, corner), (Some(u8::MAX), Some(0)));
+        // Then the asset is neither blank nor a solid block
+        assert!(opaque > 0 && clear > 0, "opaque: {opaque}, clear: {clear}");
     }
 }
