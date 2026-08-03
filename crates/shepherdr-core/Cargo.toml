@@ -15,7 +15,7 @@ rustc-hash.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["io-util", "process", "rt", "time"] }
-toml = "=1.1.2+spec-1.1.0"
+toml = "=1.1.4"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros"] }
