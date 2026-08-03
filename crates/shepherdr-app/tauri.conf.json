@@ -4,9 +4,15 @@
   "version": "0.0.0",
   "identifier": "dev.cffnpwr.shepherdr",
   "build": {
-    "beforeDevCommand": { "script": "bun run dev", "cwd": "../../frontend" },
+    "beforeDevCommand": {
+      "script": "bun run dev",
+      "cwd": "../../frontend"
+    },
     "devUrl": "http://localhost:5173",
-    "beforeBuildCommand": { "script": "bun run build", "cwd": "../../frontend" },
+    "beforeBuildCommand": {
+      "script": "bun run build",
+      "cwd": "../../frontend"
+    },
     "frontendDist": "../../frontend/dist"
   },
   "app": {
@@ -25,7 +31,17 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["app", "dmg"],
-    "icon": ["icons/shepherdr.icon", "icons/icon.icns", "icons/icon.png"]
+    "targets": [
+      "app",
+      "dmg"
+    ],
+    "icon": [
+      "icons/shepherdr.icon",
+      "icons/icon.icns",
+      "icons/icon.png"
+    ],
+    "macOS": {
+      "signingIdentity": "-"
+    }
   }
 }
