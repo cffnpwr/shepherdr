@@ -6,8 +6,9 @@ Shepherdr全体に共通する設計上の原則を定める。
 ## 責任アプリを維持する
 
 サービスは子プロセスとしてspawnし、自プロセスを`exec`で置換しない。
-macOSはローカルネットワーク操作を行ったプロセスの「責任コード（responsible code）」を追跡し、appがspawnしたヘルパーの操作はappに帰属して、承認はapp全体に記録される（[TN3179](https://developer.apple.com/documentation/technotes/tn3179-understanding-local-network-privacy)）。
-Shepherdr.appを親として全サービスを起動することで、サービスとその子孫（サーバ→shell→`ssh`等）の操作を責任コード=Shepherdr.appに帰属させる。
+macOSはローカルネットワークを操作したプロセスの「責任コード（responsible code）」を追跡する（[TN3179](https://developer.apple.com/documentation/technotes/tn3179-understanding-local-network-privacy)）。
+appがspawnしたヘルパーの操作はappに帰属し、承認はapp全体に記録される。
+Shepherdr.appを親として全サービスを起動することで、サービスとその子孫（サーバー→shell→`ssh`等）の操作を責任コード=Shepherdr.appに帰属させる。
 帰属はspawn時に決まり、子孫が`exec`で置換されても、親プロセスが終了した後の新規接続でも維持される。
 shepherdrは常駐してサービスを監視・操作する設計であり、自プロセスの`exec`置換はこれと両立しないため行わない。
 
@@ -15,7 +16,7 @@ shepherdrは常駐してサービスを監視・操作する設計であり、�
 
 launchdの`ProgramArguments`と同様に、シェルを暗黙に挟まず`command`のargvをそのまま実行する。
 ログイン環境（PATH等）が必要なサービスは`login_shell`フラグで明示的に宣言し、宣言された介在だけをshepherdrがargvを保ったまま行う（[サービス管理](./service-management.md)）。
-宣言されていない変換を行わないことで、shepherdrが加える介在はすべて設定の記述から読める。
+宣言されていない変換をしないことで、shepherdrが加える介在はすべて設定の記述から読める。
 
 ## 設定ファイルを唯一の真実とする
 

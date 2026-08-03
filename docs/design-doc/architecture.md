@@ -5,15 +5,19 @@
 macOSのLNP（TCC `kTCCServiceLocalNetwork`）は、LANへのアクセスを「責任アプリ」単位で承認する。
 前提となる事実は以下のとおり。
 
-- Daemon（グローバルセッション）はLNP対象外、ユーザセッションのAgentは対象かつ承認可能である（[TN3179](https://developer.apple.com/documentation/technotes/tn3179-understanding-local-network-privacy)、[Apple Developer Forums 763753](https://developer.apple.com/forums/thread/763753)）。
-- ad-hoc署名の素のCLIバイナリ（appバンドルでないもの）をLaunchAgentで起動した場合、承認プロンプトは出ず、システム設定→ローカルネットワークの一覧にも掲載されない。承認を与える手段が無く、LAN接続は既定拒否のまま固定される。
-- ad-hoc署名のappバンドルを`/Applications`に置き、`open`（LaunchServices）でAquaセッションに起動してLANへ接続すると、承認プロンプトが出て一覧にも掲載される。署名証明書は不要である。
-- LNPはプログラムの識別をcode signatureで追跡し、ad-hoc署名では識別の安定した追跡は保証されない（[TN3179](https://developer.apple.com/documentation/technotes/tn3179-understanding-local-network-privacy)）。ただし、バンドルIDと配置先が同一の差し替えであれば、バイナリが変わっても承認は維持される。
+- Daemon（グローバルセッション）はLNP対象外、ユーザーセッションのAgentは対象かつ承認可能である（[TN3179](https://developer.apple.com/documentation/technotes/tn3179-understanding-local-network-privacy)、[Apple Developer Forums 763753](https://developer.apple.com/forums/thread/763753)）
+- ad-hoc署名の素のCLIバイナリ（appバンドルでないもの）をLaunchAgentで起動した場合、承認プロンプトは出ず、システム設定→ローカルネットワークの一覧にも掲載されない。
+  承認を与える手段が無く、LAN接続は既定拒否のまま固定される
+- ad-hoc署名のappバンドルを`/Applications`に置き、`open`（LaunchServices）でAquaセッションに起動してLANへ接続すると、承認プロンプトが出て一覧にも掲載される。
+  署名証明書は不要である
+- LNPはプログラムの識別をcode signatureで追跡し、ad-hoc署名では識別の安定した追跡は保証されない（[TN3179](https://developer.apple.com/documentation/technotes/tn3179-understanding-local-network-privacy)）。
+  ただし、バンドルIDと配置先が同一の差し替えであれば、バイナリが変わっても承認は維持される
 
-典型的な被害例が、LaunchAgent起動の`herdr server`のペイン内からLANホストへssh不可（`EHOSTUNREACH`）となる問題である（同系統の未解決報告: [herdr discussion #1137](https://github.com/ogulcancelik/herdr/discussions/1137)）。
+典型的な被害例が、LaunchAgent起動の`herdr server`のペイン内からLANホストへssh不可（`EHOSTUNREACH`）となる問題である。
+同系統の未解決報告として[herdr discussion #1137](https://github.com/ogulcancelik/herdr/discussions/1137)がある。
 
 LNP対象外であるDaemon（グローバルセッション）でサービスを動かす経路は採らない。
-メニューバー常駐UIはユーザのGUIセッション（Aqua）を前提としており、gui domain外で動くDaemonでは成立しないためである。
+メニューバー常駐UIはユーザーのGUIセッション（Aqua）を前提としており、gui domain外で動くDaemonでは成立しないためである。
 
 ## 全体構成
 
@@ -50,9 +54,12 @@ launchd (gui domain)
 
 ## app自体の起動と終了
 
-- サポートする起動経路は`open`（LaunchServices）経由のみとする。自動起動はLaunchAgentが`open /Applications/Shepherdr.app`を実行する形とする。
-- appのクラッシュからの復帰機構はapp側には持たない。クラッシュ後は次回の起動まで無復帰となり、その間サービスは孤児として稼働を続け、次回起動時にクリーンアップされた後、設定に従って起動し直される（[サービス管理](./service-management.md)）。
-- 多重起動はアプリ内ガード（単一インスタンス制御）で抑止する。`open`は`-n`を付けない限り既存インスタンスがあれば新規起動しないが、バイナリ直接実行など非サポート経路で起動された場合も多重化だけは防ぐ。
+- サポートする起動経路は`open`（LaunchServices）経由のみとする。
+  自動起動はLaunchAgentが`open /Applications/Shepherdr.app`を実行する形とする
+- appのクラッシュからの復帰機構はapp側には持たない。
+  クラッシュ後は次回の起動まで無復帰となり、その間サービスは孤児として稼働を続け、次回起動時にクリーンアップされた後、設定に従って起動し直される（[サービス管理](./service-management.md)）
+- 多重起動はアプリ内ガード（単一インスタンス制御）で抑止する。
+  `open`は`-n`を付けない限り既存インスタンスがあれば新規起動しないが、バイナリ直接実行など非サポート経路で起動された場合も多重化だけは防ぐ
 
 ## app自身のログ
 
@@ -60,11 +67,11 @@ launchd (gui domain)
 そのため標準エラー出力は、launchdのログやunified loggingに残らない。
 app自身の実行時エラーを事後調査できるよう、appの診断ログをファイルへ永続化する。
 
-- 出力先: `~/Library/Logs/shepherdr/app/shepherdr.log`。
-- サービスの`~/Library/Logs/shepherdr/<name>.log`（[サービス管理](./service-management.md)）とは別ディレクトリに分ける。
-- サービス名の文字種に制約は無く、`shepherdr`という名前のサービスも定義できる。
-- 同一パスを2つのローテーションが独立に扱うと互いのファイルを破壊するため、ディレクトリを分けて衝突を避けている。
-- サイズ上限と世代数によるローテーションを持つ。
-- 上限は実装の既定値（1 MiB × 3世代）に固定し、`[log]`セクションは適用しない。
-- 記録レベルはerror・warn・infoとする。
+- 出力先: `~/Library/Logs/shepherdr/app/shepherdr.log`
+- サービスの`~/Library/Logs/shepherdr/<name>.log`（[サービス管理](./service-management.md)）とは別ディレクトリに分ける
+- サービス名の文字種に制約は無く、`shepherdr`という名前のサービスも定義できる
+- 同一パスを2つのローテーションが独立に扱うと互いのファイルを破壊するため、ディレクトリを分けて衝突を避けている
+- サイズ上限と世代数によるローテーションを持つ
+- 上限は実装の既定値（1 MiB × 3世代）に固定し、`[log]`セクションは適用しない
+- 記録レベルはerror・warn・infoとする
 
